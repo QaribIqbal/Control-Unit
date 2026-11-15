@@ -2356,7 +2356,19 @@ button.bar:hover .bar-fill { background: color-mix(in srgb, var(--accent) 80%, w
 .spec-raw, .stage-raw { color: var(--quiet); font-size: 12px; display: block; margin-top: 3px; white-space: normal; }
 details.evidence-block summary { cursor: pointer; display: flex; align-items: center; gap: 8px; font-weight: 550; list-style: none; }
 details.evidence-block[open] summary { margin-bottom: 10px; }
-.detail-text { white-space: pre-wrap; max-height: 220px; overflow: auto; }
+.detail-text { white-space: normal; overflow-wrap: anywhere; padding: 2px 2px 2px 0; }
+.detail-text > :first-child { margin-top: 0; }
+.detail-text > :last-child { margin-bottom: 0; }
+.record-detail .detail-text h1, .record-detail .detail-text h2, .record-detail .detail-text h3, .record-detail .detail-text h4, .record-detail .detail-text h5, .record-detail .detail-text h6 { color: #e4ecf8; font-size: 13px; line-height: 1.5; font-weight: 650; letter-spacing: normal; margin: 14px 0 6px; }
+.detail-text p { margin: 0 0 10px; }
+.detail-text ul, .detail-text ol { margin: 5px 0 12px; padding-left: 22px; }
+.detail-text li { padding-left: 2px; }
+.detail-text hr { border: 0; border-top: 1px solid var(--border); margin: 14px 0; }
+.detail-text a { color: #afc9ff; text-decoration: underline; text-underline-offset: 2px; }
+.detail-text pre, .detail-text table { display: block; max-width: 100%; overflow-x: auto; }
+.detail-text pre { padding: 10px; border-radius: 6px; background: #101720; }
+.detail-text table { border-collapse: collapse; margin: 10px 0; }
+.detail-text th, .detail-text td { padding: 5px 9px; border: 1px solid var(--border); text-align: left; }
 
 /* motion */
 .page-enter { display: flex; flex-direction: column; gap: 18px; animation: page-in 220ms var(--ease-out) both; }

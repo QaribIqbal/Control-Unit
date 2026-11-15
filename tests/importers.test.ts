@@ -52,6 +52,29 @@ describe('read-only Rio imports', () => {
     expect(result.sources.find(s => s.kind === 'social')?.status).toBe('ok');
   });
 
+  it('ignores delivery folders without a matching PLAN file', async () => {
+    await mkdir(join(home, 'deliveries/week-2026-10-06'), { recursive: true });
+    await file('deliveries/2026-11-15/PLAN.md', '# PLAN\n## 07:00 — IG-1 (Instagram reel) — BLOCKED\n');
+    const result = await importRio({ home, paths: { social: join(home, 'deliveries/*/PLAN.md') }, now });
+    const source = result.sources.find(s => s.kind === 'social')!;
+    expect(result.records.filter(r => r.actionType === 'social_post')).toHaveLength(1);
+    expect(source.status).toBe('ok');
+    expect(source.message).not.toContain('ENOENT');
+    expect(source.skipped).toBe(0);
+  });
+
+  it('imports healthy PLAN files when another matched PLAN cannot be read', async () => {
+    await mkdir(join(home, 'deliveries/broken'), { recursive: true });
+    await symlink('PLAN.md', join(home, 'deliveries/broken/PLAN.md'));
+    await file('deliveries/2026-11-15/PLAN.md', '# PLAN\n## 07:00 — IG-1 (Instagram reel) — BLOCKED\n');
+    const result = await importRio({ home, paths: { social: join(home, 'deliveries/*/PLAN.md') }, now });
+    const source = result.sources.find(s => s.kind === 'social')!;
+    expect(result.records.filter(r => r.actionType === 'social_post')).toHaveLength(1);
+    expect(source.status).toBe('ok');
+    expect(source.message).toContain('ELOOP');
+    expect(source.skipped).toBe(1);
+  });
+
   it('does not classify anticipated interviews as interviews', async () => {
     const path = await file('l.md', `| Opportunity | Next step | Owner | Deadline / status |\n|---|---|---|---|\n| Watch Co — Dev | Watch inbox for interview invite | Rio | Submitted Nov 11 |\n| Held Co — Dev | Interview held Nov 13 | Rio | Waiting |\n`);
     const result = await importRio({ home, paths: { opportunities: path }, now });

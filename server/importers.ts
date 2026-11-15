@@ -393,7 +393,13 @@ async function filesFor(pattern: string): Promise<string[]> {
   for (let index = 0; index < parts.length; index++) {
     const part = parts[index], next: string[] = [];
     for (const parent of paths) {
-      if (!/[*?]/.test(part)) { next.push(join(parent, part)); continue; }
+      if (!/[*?]/.test(part)) {
+        const path = join(parent, part);
+        if (index !== parts.length - 1) { next.push(path); continue; }
+        try { await stat(path); next.push(path); }
+        catch (error) { if (!isMissing(error)) next.push(path); }
+        continue;
+      }
       const regex = new RegExp(`^${part.split(/([*?])/).map(p => p === '*' ? '.*' : p === '?' ? '.' : p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('')}$`);
       let entries;
       try { entries = await readdir(parent, { withFileTypes: true }); } catch (error) { if (isMissing(error)) continue; throw error; }

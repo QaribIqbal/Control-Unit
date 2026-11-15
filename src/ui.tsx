@@ -1,4 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkBreaks from "remark-breaks";
+import remarkGfm from "remark-gfm";
 import { ArrowUpRight, Bot, ChevronDown, FileText, ShieldCheck, X, MessageCircle, ThumbsUp, Send, UserPlus, Reply, Megaphone, Activity, Clock3 } from "lucide-react";
 import type { AnalysisResponse, DashboardData, ExecutionRecord, SourceReport } from "../shared/types";
 import { STAGES, normalizeStage, applyActionFloor, type Stage } from "../shared/stages";
@@ -245,7 +248,15 @@ export function RecordDetail({ record, timezone, today, stale = [] }: { record: 
       <dl className="spec-sheet">
         {fields.map(([label, value]) => (<div className="spec-row" key={label}><dt>{label}</dt><dd>{value}</dd></div>))}
       </dl>
-      {showBody && <p className="detail-text">{record.detail}</p>}
+      {showBody && <div className="detail-text">
+        <ReactMarkdown remarkPlugins={[remarkGfm, remarkBreaks]} components={{
+          a: ({ href, children }) => {
+            const url = safeLink(href || null);
+            return url ? <a href={url} target="_blank" rel="noopener noreferrer">{children}</a> : <span>{children}</span>;
+          },
+          img: ({ alt }) => <span>{alt}</span>,
+        }}>{record.detail}</ReactMarkdown>
+      </div>}
       {link ? (
         <a className="output-link" href={link} target="_blank" rel="noopener noreferrer">Open recorded output<ArrowUpRight size={16} /></a>
       ) : record.outputLink ? (

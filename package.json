@@ -26,6 +26,9 @@
     "pg": "^8.23.1",
     "react": "latest",
     "react-dom": "latest",
+    "react-markdown": "^10.1.0",
+    "remark-breaks": "^4.0.0",
+    "remark-gfm": "^4.0.1",
     "serverless-http": "^4.0.0"
   },
   "overrides": {
