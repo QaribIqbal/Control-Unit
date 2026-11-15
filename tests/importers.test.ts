@@ -16,6 +16,48 @@ beforeEach(async () => { home = await mkdtemp(join(tmpdir(), 'rio-import-test-')
 afterEach(async () => { await rm(home, { recursive: true, force: true }); });
 
 describe('read-only Rio imports', () => {
+  it('infers the year for year-less dates, validating weekdays and preferring a year in the path', async () => {
+    const path = await file('job-hunt-2026-10-10/log.md', `| Company | Role | Applied |\n|---|---|---|\n| A | X | Nov 12 |\n| B | Y | Thu Oct 8 |\n| C | Z | Fri Oct 8 |\n| D | W | Nov 2026 |\n`);
+    const result = await importRio({ home, paths: { applications: path }, now });
+    const by = Object.fromEntries(result.records.map(r => [r.metadata.company, r.timestamp]));
+    expect(by.A).toBe('2026-11-12'); expect(by.B).toBe('2026-10-08');
+    expect(by.C).toBeNull(); // 8 Oct 2026 is a Thursday, not Friday
+    expect(by.D).toBeNull();
+  });
+
+  it('merges overflow cells into the last column instead of dropping the row', async () => {
+    const path = await file('ledger.md', `| Opportunity | Next step | Owner | Status |\n|---|---|---|---|\n| EMBL-EBI — Dev | Apply | Rio | Open | extra | cell |\n`);
+    const result = await importRio({ home, paths: { opportunities: path }, now });
+    expect(result.records).toHaveLength(1);
+    expect(result.records[0].target).toBe('EMBL-EBI — Dev');
+    expect(result.sources.find(s => s.path === path)?.skipped).toBe(0);
+  });
+
+  it('accepts approximate LinkedIn times and counts the entries as touches', async () => {
+    const path = await file('li.md', `## 2026-11-14\n- ~08:04 PKT (approx) | Ana Lee (CEO, Acme) | Post: "x" — y | thoughtful (type 4) | liked + commented | https://example.test/p\n- 09:10 PKT (est. ±3 min) | Bo Chan (CTO, Beta) | Post: "z" | direct | replied to comment | n/a\n`);
+    const result = await importRio({ home, paths: { linkedin: path }, now });
+    const li = result.records.filter(r => r.actionType === 'linkedin_touch');
+    expect(li).toHaveLength(2);
+    expect(li.every(r => r.status === 'success' && r.timestamp === '2026-11-14')).toBe(true);
+  });
+
+  it('upgrades a PLAN slot to published from a Published/Live bullet and degrades per file on failure', async () => {
+    await file('p/2026-11-13/PLAN.md', `# PLAN\n## 07:00 — IG-1 (Instagram reel) — READY\n- Caption: hi\n- Published: https://example.test/p/1\n## 12:00 — LI-1 (LinkedIn post) — READY\n- Caption: yo\n`);
+    await mkdir(join(home, 'p/2026-11-14/PLAN.md'), { recursive: true }); // a directory is not a readable file
+    await file('p/2026-11-15/PLAN.md', `# PLAN\n## 07:00 — IG-2 (Instagram reel) — BLOCKED\n`);
+    const result = await importRio({ home, paths: { social: join(home, 'p/*/PLAN.md') }, now });
+    const posts = result.records.filter(r => r.actionType === 'social_post');
+    expect(posts.map(r => r.status).sort()).toEqual(['blocked', 'planned', 'published']);
+    expect(posts.find(r => r.status === 'published')?.outputLink).toBe('https://example.test/p/1');
+    expect(result.sources.find(s => s.kind === 'social')?.status).toBe('ok');
+  });
+
+  it('does not classify anticipated interviews as interviews', async () => {
+    const path = await file('l.md', `| Opportunity | Next step | Owner | Deadline / status |\n|---|---|---|---|\n| Watch Co — Dev | Watch inbox for interview invite | Rio | Submitted Nov 11 |\n| Held Co — Dev | Interview held Nov 13 | Rio | Waiting |\n`);
+    const result = await importRio({ home, paths: { opportunities: path }, now });
+    expect(result.records.map(r => [r.target, r.actionType])).toEqual([['Watch Co — Dev', 'job_application'], ['Held Co — Dev', 'interview']]);
+  });
+
   it('names the file and quotes the line for each skipped entry in a multi-file source', async () => {
     await file('d/2026-11-01/PLAN.md', '# Plan\n- some stray note about nothing\n');
     await file('d/2026-11-02/PLAN.md', '# Plan\n- another stray note\n');
@@ -160,8 +202,11 @@ describe('read-only Rio imports', () => {
     const leads = result.records.filter(r => r.actionType === 'dental_lead');
     expect(leads).toHaveLength(2);
     expect(leads.map(r => [r.target, r.metadata.stage])).toEqual([['Northside Clinic', 'Sent'], ['Hill Dental', 'Call booked']]);
-    expect(leads.every(r => r.timestamp === null)).toBe(true);
-    expect(result.sources.find(s => s.path === path)?.records).toBe(2);
+    expect(leads.map(r => r.timestamp)).toEqual(['2026-10-08', '2026-10-09']);
+    const aggregate = result.records.filter(r => r.recordKind === 'summary');
+    expect(aggregate).toHaveLength(1);
+    expect(aggregate[0]).toMatchObject({ timestamp: '2026-10-08', metadata: { metric: 'sent', count: 5 } });
+    expect(result.sources.find(s => s.path === path)?.records).toBe(3);
   });
 
   it('does not promote negated dental milestones or a waiting stage to success', async () => {

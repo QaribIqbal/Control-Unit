@@ -17,7 +17,7 @@ const aliases: Record<string, string> = {
   employer: 'company', organisation: 'company', organization: 'company', practice: 'company', clinic: 'company', client: 'company',
   position: 'role', 'job title': 'role', 'job role': 'role', 'contact name': 'person', contact: 'person', name: 'person',
   state: 'status', outcome: 'status', 'current stage': 'stage', 'pipeline stage': 'stage',
-  'applied on': 'appliedAt', 'applied date': 'appliedAt', 'application date': 'appliedAt', 'date applied': 'appliedAt', 'sent on': 'date', day: 'date',
+  'applied': 'appliedAt', 'applied on': 'appliedAt', 'applied date': 'appliedAt', 'application date': 'appliedAt', 'date applied': 'appliedAt', 'sent on': 'date', day: 'date',
   'updated at': 'updated', 'last updated': 'updated', 'last activity': 'updated', timestamp: 'date',
   output: 'link', url: 'link', proof: 'link', 'output link': 'link', 'post url': 'link', 'assessment link': 'link',
   activity: 'action', type: 'action', 'action type': 'action', channel: 'platform',
@@ -28,7 +28,36 @@ const aliases: Record<string, string> = {
 const header = (s: string) => { const key = normalize(s); return aliases[key] || key; };
 const cells = (s: string) => s.trim().replace(/^\|/, '').replace(/\|$/, '').split(/(?<!\\)\|/).map(c => c.replace(/\\\|/g, '|').trim());
 
-/** Only unambiguous calendar dates are accepted; file mtimes are never event dates. */
+/** Year context for year-less dates ("Nov 12", "Thu Oct 8"): a 20xx year in the file path wins, otherwise the most recent past occurrence relative to `now`. Set synchronously around each parse. */
+let dateContext: { year?: number; now: Date } = { now: new Date() };
+function withDateContext<T>(path: string, now: Date, run: () => T): T {
+  const previous = dateContext;
+  dateContext = { year: Number(path.match(/(?:^|[^0-9])(20\d{2})(?![0-9])/)?.[1]) || undefined, now };
+  try { return run(); } finally { dateContext = previous; }
+}
+const MONTHS = ['january', 'february', 'march', 'april', 'may', 'june', 'july', 'august', 'september', 'october', 'november', 'december'];
+const WEEKDAYS = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
+const monthIndex = (name: string) => MONTHS.findIndex(v => v === name.toLowerCase() || (name.length >= 3 && v.slice(0, 3) === name.slice(0, 3).toLowerCase() && v.startsWith(name.toLowerCase())));
+function yearlessDate(text: string): string | null {
+  const match = text.match(/(?:\b(Mon|Tue|Wed|Thu|Fri|Sat|Sun)[a-z]*\.?,?\s+)?(?<![0-9A-Za-z])(?:(\d{1,2})(?:st|nd|rd|th)?\s+([A-Z][a-z]{2,8})|([A-Z][a-z]{2,8})\.?\s+(\d{1,2})(?:st|nd|rd|th)?)(?![0-9])(?!\s*,?\s*\d{4})/);
+  if (!match) return null;
+  const monthName = match[3] || match[4], day = Number(match[2] || match[5]), m = monthIndex(monthName) + 1;
+  if (m < 1 || monthName.length < 3 || (monthName.length > 3 && MONTHS[m - 1] !== monthName.toLowerCase())) return null;
+  const valid = (y: number) => { const d = new Date(Date.UTC(y, m - 1, day)); return d.getUTCFullYear() === y && d.getUTCMonth() === m - 1 && d.getUTCDate() === day ? d : null; };
+  const weekday = match[1] ? WEEKDAYS.indexOf(match[1].toLowerCase()) : -1;
+  const nowYear = dateContext.now.getUTCFullYear();
+  let candidates = dateContext.year ? [dateContext.year] : [nowYear, nowYear - 1];
+  if (weekday >= 0 && !dateContext.year) candidates = [nowYear, nowYear - 1, nowYear - 2];
+  const horizon = dateContext.now.getTime() + 2 * 86400000;
+  for (const y of candidates) {
+    const d = valid(y); if (!d) continue;
+    if (weekday >= 0 && d.getUTCDay() !== weekday) continue;
+    if (!dateContext.year && d.getTime() > horizon) continue;
+    return `${String(y).padStart(4, '0')}-${String(m).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+  }
+  return null;
+}
+/** Calendar dates only; file mtimes are never event dates. Year-less dates infer the year from context (see dateContext). */
 function parseDate(raw: string): string | null {
   const text = clean(raw);
   if (!text) return null;
@@ -36,13 +65,11 @@ function parseDate(raw: string): string | null {
   let y: number, m: number, d: number;
   if (iso) { y = Number(iso[1]); m = Number(iso[2]); d = Number(iso[3]); }
   else {
-    const months = ['january', 'february', 'march', 'april', 'may', 'june', 'july', 'august', 'september', 'october', 'november', 'december'];
     const named = text.match(/\b(\d{1,2})(?:st|nd|rd|th)?\s+([A-Za-z]+)\s*,?\s*(\d{4})\b/) || text.match(/\b([A-Za-z]+)\s+(\d{1,2})(?:st|nd|rd|th)?\s*,?\s*(\d{4})\b/);
-    if (!named) return null;
+    if (!named) return yearlessDate(text);
     const dayFirst = /^\d/.test(named[1]);
     d = Number(named[dayFirst ? 1 : 2]); y = Number(named[3]);
-    const month = named[dayFirst ? 2 : 1].toLowerCase();
-    m = months.findIndex(v => v === month || v.slice(0, 3) === month) + 1;
+    m = monthIndex(named[dayFirst ? 2 : 1]) + 1;
   }
   const date = new Date(Date.UTC(y, m - 1, d));
   if (date.getUTCFullYear() !== y || date.getUTCMonth() !== m - 1 || date.getUTCDate() !== d) return null;
@@ -142,7 +169,10 @@ function tableRecord(fields: Fields, kind: SourceKind, source: SourceRef, contex
   const action = clean(get(fields, 'action')), detail = source.excerpt || Object.values(fields).join(' | ');
   if (isSummary(company || person || title)) return null;
   const classify = (value: string) => /assessment|take.home|test task|survey|intro video/i.test(value) ? 'assessment' : /interview/i.test(value) ? 'interview' : '';
-  const opportunityAction = classify(explicitStage) || classify(nextStep) || classify(stage) || classify(action);
+  // Anticipated events ("watch for an interview invite") are not interviews; only evidenced ones classify.
+  const anticipatory = (value: string) => /\b(?:watch(?:ing)?|await(?:ing)?|waiting|hop(?:e|ing)|possible|potential|chase|if|may|might|invite|invitation)\b/i.test(value);
+  const classifyEvidence = (value: string) => anticipatory(value) && !/\b(?:held|scheduled|booked|completed|submitted|done|took|taken|passed)\b/i.test(value) ? '' : classify(value);
+  const opportunityAction = classify(explicitStage) || (explicitStage ? '' : classifyEvidence(nextStep) || classifyEvidence(stage)) || classify(action);
   let actionType: string;
   if (kind === 'dental') actionType = 'dental_lead';
   else if (kind === 'social') actionType = 'social_post';
@@ -194,7 +224,7 @@ function bulletRecord(text: string, kind: SourceKind, source: SourceRef, date: s
 
 function timedLinkedInRecord(text: string, source: SourceRef, date: string | null): ExecutionRecord | null {
   const values = cells(text.replace(/^\s*[-*+]\s+/, ''));
-  if (values.length < 5 || !/^\d{1,2}:\d{2}\s+PKT$/i.test(values[0])) return null;
+  if (values.length < 5 || !/^~?\s*\d{1,2}:\d{2}\s*(?:\([^)]*\)\s*)?PKT(?:\s*\([^)]*\))?$/i.test(values[0])) return null;
   const person = clean(values[1].replace(/\s*\([^)]*\)\s*$/, ''));
   const context = values[1].match(/\(([^)]*)\)\s*$/)?.[1] || '';
   const company = clean(context.includes(',') ? context.split(',').slice(1).join(',') : '');
@@ -205,13 +235,27 @@ function timedLinkedInRecord(text: string, source: SourceRef, date: string | nul
   const completedTouch = /\b(liked|commented|reposted|shared|messaged|sent|connected)\b/i.test(activity) && !/\b(?:not|never|no)\s+(?:liked|commented|reposted|shared|messaged|sent|connected)\b/i.test(activity);
   const metadata: ExecutionRecord['metadata'] = { person };
   if (company) metadata.company = company.slice(0, 4000);
-  const type = /commented/i.test(activity) ? 'comment' : /liked/i.test(activity) ? 'like' : touchType(activity);
-  if (type) metadata.touchType = type;
+  const type = /commented/i.test(activity) ? 'comment' : /liked/i.test(activity) ? 'like' : /^post\b/i.test(values[2] || '') ? 'post' : touchType(activity) || 'other';
+  metadata.touchType = type;
   const typeCell = values[values.length - (hasLinkCell ? 3 : 2)];
   if (typeCell) metadata.type = clean(typeCell).slice(0, 4000);
   return record({ agent: 'Rio', timestamp: date, actionType: 'linkedin_touch', target: person, detail: source.excerpt || text,
-    status: completedTouch ? 'success' : statusOf(activity), outputLink: linkOf(values.at(-1) || '') || linkOf(text), source,
+    status: completedTouch ? 'success' : (['failed', 'blocked', 'pending', 'planned'] as Status[]).includes(statusOf(activity)) ? statusOf(activity) : 'success', outputLink: linkOf(values.at(-1) || '') || linkOf(text), source,
     recordKind: 'execution', metadata });
+}
+
+const AGGREGATE_METRICS: [RegExp, string][] = [[/^sent$/i, 'sent'], [/^repl(?:y|ies)$/i, 'replies'], [/^calls?(?:\s+booked)?$/i, 'calls'], [/^sales?$/i, 'sales']];
+/** Daily summary bullets ("- Sent: 5 IG DMs — names"). Filled ones become summary records (never leads); empty template ones are ignored. */
+function dentalAggregate(line: string, source: SourceRef, date: string | null): ExecutionRecord | 'empty' | null {
+  const m = line.trim().replace(/^[-*+]\s+/, '').replace(/\*\*/g, '').match(/^([A-Za-z ]{3,16}):\s*(.*)$/);
+  const metric = m && AGGREGATE_METRICS.find(([re]) => re.test(m[1].trim()))?.[1];
+  if (!m || !metric) return null;
+  const value = clean(m[2]);
+  if (!value || /^(?:none(?:\s+yet)?|no(?:ne)?|n\/?a|nil|tbd|0|—|–|-|\?+|_+)\b[\s.]*$/i.test(value)) return 'empty';
+  const count = Number(value.match(/^(\d+)\b/)?.[1]);
+  if (count === 0) return 'empty';
+  const metadata: ExecutionRecord['metadata'] = { metric, ...(Number.isFinite(count) ? { count } : {}) };
+  return record({ agent: 'Rio', timestamp: date, actionType: 'summary', target: `${metric} ${date || 'undated'}`, detail: source.excerpt || line, status: 'unknown', outputLink: null, source, recordKind: 'summary', metadata });
 }
 
 function planSlotRecord(heading: string, body: string[], source: SourceRef, date: string | null): ExecutionRecord | null {
@@ -221,12 +265,13 @@ function planSlotRecord(heading: string, body: string[], source: SourceRef, date
   if (!target) return null;
   const label = clean(match[2]);
   const platform = /\binstagram\b/i.test(label) ? 'Instagram' : /\blinkedin\b/i.test(label) ? 'LinkedIn' : label.split(/\s+/)[0];
-  const status: Status = match[3].toUpperCase() === 'PUBLISHED' ? 'published' : match[3].toUpperCase() === 'BLOCKED' ? 'blocked' : 'planned';
+  const liveLink = body.map(line => line.match(/^[-*+]\s*(?:\*\*)?(?:published|live)(?:\*\*)?\s*:\s*(?:\*\*)?\s*(\S*https?:\/\/\S+)/i)?.[1]).find(Boolean);
+  const status: Status = liveLink || match[3].toUpperCase() === 'PUBLISHED' ? 'published' : match[3].toUpperCase() === 'BLOCKED' ? 'blocked' : 'planned';
   const detail = [heading, ...body].join('\n').slice(0, 16000);
-  const metadata: ExecutionRecord['metadata'] = { platform, stage: match[3].toUpperCase() };
+  const metadata: ExecutionRecord['metadata'] = { platform, stage: status === 'published' ? 'PUBLISHED' : match[3].toUpperCase() };
   if (status === 'blocked' && date) metadata.blockedSince = date;
   return record({ agent: 'Rio', timestamp: date, actionType: 'social_post', target, detail, status,
-    outputLink: linkOf(detail), source, recordKind: 'snapshot', metadata });
+    outputLink: liveLink ? linkOf(liveLink) : linkOf(detail), source, recordKind: 'snapshot', metadata });
 }
 
 function parseMarkdown(text: string, path: string, kind: SourceKind, diagnostics: Diagnostics): ExecutionRecord[] {
@@ -255,12 +300,18 @@ function parseMarkdown(text: string, path: string, kind: SourceKind, diagnostics
       if (values.every(v => /^:?-{3,}:?$/.test(v))) continue;
       if (i + 1 < lines.length && cells(lines[i + 1]).every(v => /^:?-{3,}:?$/.test(v))) { headings = values.map(header); continue; }
       if (headings) {
+        if (values.length > headings.length) values.splice(headings.length - 1, values.length - headings.length + 1, values.slice(headings.length - 1).join(' | '));
         if (values.length !== headings.length) { warn(diagnostics, `line ${i + 1}`, `table column count differs from header (${values.length} cells, expected ${headings.length}): ${snippet(line)}`); continue; }
         const fields = Object.fromEntries(headings.map((h, index) => [h, values[index]]));
         if (isSummary(values[0])) { diagnostics.skipped++; continue; }
         const parsed = tableRecord(fields, kind, source, date, diagnostics); if (parsed) records.push(parsed);
         continue;
       }
+    }
+    if (kind === 'dental' && /^\s*[-*+]\s/.test(line)) {
+      const aggregate = dentalAggregate(line, source, date);
+      if (aggregate === 'empty') continue;
+      if (aggregate) { records.push(aggregate); continue; }
     }
     if (/^\s*(?:[-*+]\s|\d+[.)]\s)/.test(line)) {
       const parsed = kind === 'linkedin' ? timedLinkedInRecord(line, source, date) || bulletRecord(line, kind, source, date, diagnostics) : bulletRecord(line, kind, source, date, diagnostics);
@@ -282,8 +333,11 @@ function cellText(value: ExcelJS.CellValue): string {
   }
   return String(value);
 }
-async function parseWorkbook(buffer: Buffer, path: string, diagnostics: Diagnostics): Promise<ExecutionRecord[]> {
+async function parseWorkbook(buffer: Buffer, path: string, diagnostics: Diagnostics, now: Date): Promise<ExecutionRecord[]> {
   const workbook = new ExcelJS.Workbook(); await workbook.xlsx.load(buffer as unknown as Parameters<typeof workbook.xlsx.load>[0]);
+  return withDateContext(path, now, () => parseSheets(workbook, path, diagnostics));
+}
+function parseSheets(workbook: ExcelJS.Workbook, path: string, diagnostics: Diagnostics): ExecutionRecord[] {
   const records: ExecutionRecord[] = [];
   for (const sheet of workbook.worksheets) {
     let headings: string[] | null = null;
@@ -350,16 +404,18 @@ async function sourceImport(path: string, kind: SourceKind, now: Date, workbook 
   try { files = await filesFor(path); }
   catch (error) { report.status = isMissing(error) ? 'missing' : 'error'; report.message = errorMessage(error); return { records, sources: [report] }; }
   if (!files.length) { report.status = 'missing'; report.message = 'No matching source files'; }
+  let failures = 0;
   for (const file of files) {
     const firstWarning = diagnostics.warnings.length;
     try {
       const buffer = await readFile(file);
-      const parsed = workbook ? await parseWorkbook(buffer, file, diagnostics) : parseMarkdown(buffer.toString('utf8'), file, kind, diagnostics);
+      const parsed = workbook ? await parseWorkbook(buffer, file, diagnostics, now) : withDateContext(file, now, () => parseMarkdown(buffer.toString('utf8'), file, kind, diagnostics));
       records.push(...parsed);
       if (!parsed.length) diagnostics.warnings.push(`${file}: no recognized records; empty or unparseable source`);
-    } catch (error) { report.status = isMissing(error) && files.length === 1 ? 'missing' : 'error'; diagnostics.warnings.push(`${file}: ${errorMessage(error)}`); }
+    } catch (error) { failures++; diagnostics.skipped++; if (isMissing(error) && files.length === 1) report.status = 'missing'; diagnostics.warnings.push(`${file}: could not be read (${errorMessage(error)}); skipped this file`); }
     if (files.length > 1) for (let w = firstWarning; w < diagnostics.warnings.length; w++) if (!diagnostics.warnings[w].startsWith(file)) diagnostics.warnings[w] = `${file} ${diagnostics.warnings[w]}`;
   }
+  if (failures && report.status !== 'missing') report.status = failures === files.length ? 'error' : 'ok';
   report.records = records.length; report.skipped = diagnostics.skipped;
   report.message = diagnostics.warnings.length ? clampMessage(diagnostics.warnings) : report.message || `Imported ${records.length} records read-only`;
   return { records, sources: [report] };

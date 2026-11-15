@@ -38,7 +38,7 @@ describe('module summaries', () => {
     const byDate = Object.fromEntries(data.applicationsDaily.map(d => [d.date, d.count]));
     expect(byDate['2026-11-14']).toBe(2); expect(byDate['2026-11-13']).toBe(1);
     expect(data.applicationsDaily).toHaveLength(14);
-    expect(data.applicationStages).toEqual([{ stage: 'Applied', count: 4, recordIds: expect.any(Array) }]);
+    expect(data.applicationStages.map(s => [s.stage, s.count])).toEqual([['Applied', 4], ['Screening', 0], ['Assessment', 0], ['Interview', 0], ['Offer', 0], ['Closed', 0]]);
     const apps = moduleSummaries(data).find(s => s.id === 'applications')!;
     expect(apps.value).toBe(4);
   });

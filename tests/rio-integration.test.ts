@@ -53,7 +53,7 @@ it('projects Rio-format source rows into traceable dashboard sections', async ()
   expect(dashboard.kpis.find(k => k.id === 'linkedin-total')?.value).toBe(1);
   expect(dashboard.records.find(r => r.actionType === 'linkedin_touch')).toMatchObject({ target: 'Stephen McGhee', source: { path: linkedin, line: 2 } });
   expect(dashboard.entities.social).toHaveLength(3);
-  expect(dashboard.socialPlatforms.find(p => p.platform === 'Instagram')).toMatchObject({ planned: 1, published: 1, blocked: 1 });
+  expect(dashboard.socialPlatforms.find(p => p.platform === 'Instagram')).toMatchObject({ planned: 0, published: 1, blocked: 1 });
   expect(dashboard.socialPlatforms.find(p => p.platform === 'LinkedIn')).toMatchObject({ planned: 1, published: 0, blocked: 0 });
   expect(dashboard.records.find(r => r.actionType === 'summary' && r.source.path === memory)).toMatchObject({ timestamp: '2026-11-15', source: { path: memory } });
   expect(imported.sources.find(s => s.kind === 'social')).toMatchObject({ path: join(home, 'deliveries/*/PLAN.md'), status: 'ok', records: 3 });
