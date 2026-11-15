@@ -16,6 +16,17 @@ beforeEach(async () => { home = await mkdtemp(join(tmpdir(), 'rio-import-test-')
 afterEach(async () => { await rm(home, { recursive: true, force: true }); });
 
 describe('read-only Rio imports', () => {
+  it('truncates oversized daily memory summaries so snapshots stay valid', async () => {
+    const path = await file('memory/2026-11-14.md', `# Daily\n${'x'.repeat(170000)}\n`);
+    const result = await importRio({ home, paths: { memory: path }, now });
+    expect(result.records).toHaveLength(1);
+    const rec = result.records[0];
+    expect(rec.detail.length).toBeLessThan(5000);
+    expect(rec.detail).toContain('truncated');
+    expect((rec.source.excerpt || '').length).toBeLessThan(5000);
+    expect(() => normalizeExecution(rec)).not.toThrow();
+  });
+
   it('reports every absent path without fabricating records', async () => {
     const result = await importRio({ home, now });
     expect(result.records).toEqual([]);
@@ -79,6 +90,121 @@ describe('read-only Rio imports', () => {
     const posts = result.records.filter(r => r.actionType === 'social_post');
     expect(posts).toHaveLength(2);
     expect(posts.map(r => [r.metadata.platform, r.status])).toEqual([['LinkedIn', 'planned'], ['Instagram', 'published']]);
+  });
+
+  it('imports Rio opportunity-ledger rows with an explicit opportunity and next move', async () => {
+    const path = await file('OPPORTUNITY-LEDGER.md', `# Opportunity ledger\n## Employer in motion (highest value, act first)\n| Opportunity | Value | Next step | Owner | Deadline / status |\n|---|---|---|---|---|\n| WarriorBabe — AI Specialist | Remote role, pay unstated | Survey + intro video SUBMITTED Nov 11; awaiting outcome | Rio (watch) | Submitted Nov 11; invited Nov 6 |\n`);
+    const result = await importRio({ home, paths: { opportunities: path }, now });
+    const assessments = result.records.filter(r => r.actionType === 'assessment');
+    expect(assessments).toHaveLength(1);
+    expect(assessments[0]).toMatchObject({ target: 'WarriorBabe — AI Specialist', timestamp: null, recordKind: 'snapshot', source: { path, line: 5 }, metadata: { company: 'WarriorBabe', role: 'AI Specialist', waitingOn: 'Rio (watch)', waitingFor: 'Survey + intro video SUBMITTED Nov 11; awaiting outcome' } });
+    expect(result.sources.find(s => s.path === path)?.records).toBe(1);
+  });
+
+  it('imports Rio tracker rows after a title line and its real header', async () => {
+    const workbook = new ExcelJS.Workbook();
+    for (const name of ['Live priorities', 'Watching (submitted)', 'Other gates', 'Closed']) workbook.addWorksheet(name);
+    const sheet = workbook.getWorksheet('Live priorities')!;
+    sheet.addRow(['LIVE — sorted by priority. Score = stage']);
+    sheet.addRow(['Priority', 'Score', 'Opportunity', 'Stage', 'Salary (as stated)', 'Hire likelihood', 'Deadline', 'Next step', 'Owner']);
+    sheet.addRow([1, 100, 'IZ Global — AI Voice Dialer', 'INTERVIEW HELD Fri Nov 13, 18:30 PKT', 'Ask PKR 140,000/mo, floor 120,000', 'High', 'Held Nov 13', 'Watch inbox for follow-up', 'Qarib']);
+    const path = await file('opportunity-tracker.xlsx', new Uint8Array(await workbook.xlsx.writeBuffer()));
+    const result = await importRio({ home, paths: { workbook: path }, now });
+    const interviews = result.records.filter(r => r.actionType === 'interview');
+    expect(interviews).toHaveLength(1);
+    expect(interviews[0]).toMatchObject({ target: 'IZ Global — AI Voice Dialer', timestamp: null, recordKind: 'snapshot', source: { path, sheet: 'Live priorities', row: 3 }, metadata: { company: 'IZ Global', role: 'AI Voice Dialer', stage: 'INTERVIEW HELD Fri Nov 13, 18:30 PKT', waitingOn: 'Qarib', waitingFor: 'Watch inbox for follow-up' } });
+    expect(result.sources.find(s => s.path === path)?.records).toBe(1);
+  });
+
+  it('imports timed LinkedIn activity bullets but not sweep notes', async () => {
+    const path = await file('linkedin/log.md', `# LinkedIn log\n## 2026-10-09 — 3 posted\n- 08:08 PKT | Stephen McGhee (Founder, company) | Post: "post summary" — detail | thoughtful (type 4) | liked + commented | https://www.linkedin.com/feed/update/example\n- Sweep notes (nothing sent)\n`);
+    const result = await importRio({ home, paths: { linkedin: path }, now });
+    const touches = result.records.filter(r => r.actionType === 'linkedin_touch');
+    expect(touches).toHaveLength(1);
+    expect(touches[0]).toMatchObject({ target: 'Stephen McGhee', timestamp: '2026-10-09', status: 'success', outputLink: 'https://www.linkedin.com/feed/update/example', source: { path, line: 3 }, metadata: { person: 'Stephen McGhee' } });
+    expect(result.sources.find(s => s.path === path)?.records).toBe(1);
+  });
+
+  it('imports Rio daily PLAN slots as per-platform planned, blocked, and published posts', async () => {
+    const path = await file('deliveries/2026-11-15/PLAN.md', `# PLAN\nStatus: one ready, one blocked, one published.\n## 07:00 — IG-1115-0700 (Instagram reel) — BLOCKED\nAwaiting approval from Qarib.\n## 12:00 — LI-1115-1200 (LinkedIn post) — READY\nCaption ready for review.\n## 18:00 — IG-1115-1800 (Instagram carousel) — PUBLISHED\nPublished at https://example.test/post\n`);
+    const result = await importRio({ home, paths: { social: join(home, 'deliveries/*/PLAN.md') }, now });
+    const posts = result.records.filter(r => r.actionType === 'social_post');
+    expect(posts).toHaveLength(3);
+    expect(posts.map(r => [r.metadata.platform, r.status])).toEqual([['Instagram', 'blocked'], ['LinkedIn', 'planned'], ['Instagram', 'published']]);
+    expect(posts.every(r => r.timestamp === '2026-11-15')).toBe(true);
+    expect(posts[0]).toMatchObject({ source: { path, line: 3 } });
+    expect(posts[0].detail).toContain('Awaiting approval from Qarib');
+    expect(posts[2].outputLink).toBe('https://example.test/post');
+    expect(result.sources.find(s => s.kind === 'social')?.records).toBe(3);
+  });
+
+  it('does not treat a weekly PLAN directory date as the slot publication date', async () => {
+    await file('deliveries/week-2026-10-06/PLAN.md', '## 07:00 — IG-week-0700 (Instagram reel) — PUBLISHED\nPublished at https://example.test/post\n');
+    const result = await importRio({ home, paths: { social: join(home, 'deliveries/*/PLAN.md') }, now });
+    expect(result.records.find(r => r.actionType === 'social_post')?.timestamp).toBeNull();
+  });
+
+  it('derives dental stages only from affirmative table cells, not daily aggregate bullets', async () => {
+    const path = await file('cash-track/log.md', `# Cash track\n| Date | Channel | Clinic | Sent | Reply | Call booked | Sale |\n|---|---|---|---|---|---|---|\n| Thu Oct 8 | IG DM | Northside Clinic | yes | | | |\n| Fri Oct 9 | Email | Hill Dental | yes | replied | booked | |\n## Daily summary\n### Thu Oct 8\n- Sent: 5 IG DMs — clinic names...\n`);
+    const result = await importRio({ home, paths: { dental: path }, now });
+    const leads = result.records.filter(r => r.actionType === 'dental_lead');
+    expect(leads).toHaveLength(2);
+    expect(leads.map(r => [r.target, r.metadata.stage])).toEqual([['Northside Clinic', 'Sent'], ['Hill Dental', 'Call booked']]);
+    expect(leads.every(r => r.timestamp === null)).toBe(true);
+    expect(result.sources.find(s => s.path === path)?.records).toBe(2);
+  });
+
+  it('does not promote negated dental milestones or a waiting stage to success', async () => {
+    const path = await file('cash-track/negated.md', `| Date | Channel | Clinic | Sent | Reply | Call booked | Sale |\n|---|---|---|---|---|---|---|\n| Thu Oct 8 | Email | Not Yet Clinic | yes | no reply | not booked | No sale |\n| Fri Oct 9 | Email | Placeholder Clinic | yes | unknown | ? | TBD |\n`);
+    const waiting = await file('cash-track/waiting.md', `| Practice | Stage |\n|---|---|\n| Pending Clinic | Awaiting response |\n`);
+    const result = await importRio({ home, paths: { dental: path }, now });
+    const lead = result.records.find(r => r.target === 'Not Yet Clinic');
+    expect(lead?.metadata.stage).toBe('Sent');
+    expect(lead?.status).not.toBe('success');
+    expect(result.records.find(r => r.target === 'Placeholder Clinic')?.metadata.stage).toBe('Sent');
+    const waitingResult = await importRio({ home, paths: { dental: waiting }, now });
+    expect(waitingResult.records.find(r => r.target === 'Pending Clinic')?.status).not.toBe('success');
+  });
+
+  it('prioritizes an explicit opportunity stage over future next-step verbs', async () => {
+    const path = await file('OPPORTUNITY-LEDGER.md', `| Opportunity | Stage | Next step |\n|---|---|---|\n| Acme — Engineer | Interview scheduled | Complete take-home assessment later |\n| Beta — Analyst | Rejected | Submit a different application later |\n`);
+    const result = await importRio({ home, paths: { opportunities: path }, now });
+    const interview = result.records.find(r => r.target === 'Acme — Engineer');
+    expect(interview?.actionType).toBe('interview');
+    expect(interview?.metadata.stage).toBe('Interview scheduled');
+    expect(result.records.find(r => r.target === 'Beta — Analyst')?.status).not.toBe('success');
+  });
+
+  it('keeps a rejected ledger deadline status failed despite a future next step', async () => {
+    const path = await file('OPPORTUNITY-LEDGER.md', '| Opportunity | Next step | Deadline / status |\n|---|---|---|\n| Beta — Analyst | Follow up next week | Rejected |\n');
+    const result = await importRio({ home, paths: { opportunities: path }, now });
+    expect(result.records[0]).toMatchObject({ target: 'Beta — Analyst', status: 'failed' });
+  });
+
+  it('keeps the full role when an opportunity has multiple em dashes', async () => {
+    const path = await file('OPPORTUNITY-LEDGER.md', `| Opportunity | Stage |\n|---|---|\n| Acme — Head of AI — Voice | Interview scheduled |\n`);
+    const result = await importRio({ home, paths: { opportunities: path }, now });
+    expect(result.records).toHaveLength(1);
+    expect(result.records[0]).toMatchObject({ target: 'Acme — Head of AI — Voice', metadata: { company: 'Acme', role: 'Head of AI — Voice' } });
+  });
+
+  it('extracts the company from a timed LinkedIn entry parenthetical', async () => {
+    const path = await file('linkedin/log.md', `## 2026-10-09\n- 08:08 PKT | Stephen McGhee (Founder, Acme) | Post: "summary" | thoughtful (type 4) | liked + commented | https://www.linkedin.com/feed/update/example\n`);
+    const result = await importRio({ home, paths: { linkedin: path }, now });
+    const touch = result.records.find(r => r.actionType === 'linkedin_touch');
+    expect(touch).toMatchObject({ target: 'Stephen McGhee', metadata: { person: 'Stephen McGhee', company: 'Acme' } });
+  });
+
+  it('keeps the action and link when a LinkedIn post excerpt contains a pipe', async () => {
+    const path = await file('linkedin/log.md', '## 2026-10-09\n- 08:08 PKT | Stephen McGhee (Founder, Acme) | Post: "A | B" — detail | thoughtful (type 4) | liked + commented | https://example.test/post\n');
+    const result = await importRio({ home, paths: { linkedin: path }, now });
+    expect(result.records.find(r => r.actionType === 'linkedin_touch')).toMatchObject({ status: 'success', outputLink: 'https://example.test/post', metadata: { touchType: 'comment' } });
+  });
+
+  it('counts a timed LinkedIn touch with an explicit missing URL cell', async () => {
+    const path = await file('linkedin/log.md', '## 2026-10-09\n- 08:08 PKT | Stephen McGhee (Founder, Acme) | Post: summary | thoughtful (type 4) | liked + commented | N/A\n');
+    const result = await importRio({ home, paths: { linkedin: path }, now });
+    expect(result.records.find(r => r.actionType === 'linkedin_touch')).toMatchObject({ status: 'success', outputLink: null, metadata: { touchType: 'comment' } });
   });
 
   it('surfaces corrupted workbooks and unparseable source contents', async () => {

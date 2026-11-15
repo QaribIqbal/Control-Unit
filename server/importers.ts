@@ -1,6 +1,6 @@
 import { readFile, readdir, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { basename, join, resolve, sep } from 'node:path';
+import { basename, dirname, join, resolve, sep } from 'node:path';
 import { createHash } from 'node:crypto';
 import ExcelJS from 'exceljs';
 import type { ExecutionRecord, ImportResult, SourceKind, SourceRef, SourceReport, Status } from '../shared/types.js';
@@ -101,35 +101,71 @@ function record(input: Omit<ExecutionRecord, 'id' | 'entityKey'>, entityKey?: st
 function isSummary(text: string) {
   return /^(?:total|totals|summary|daily total|weekly total)\b/i.test(clean(text)) || /^\d+\s+(?:posts?|contacts?|messages?|applications?|leads?)\b/i.test(clean(text));
 }
-function summary(path: string, detail: string, timestamp: string | null, line = 1): ExecutionRecord {
+const SUMMARY_LIMIT = 4000;
+function summary(path: string, fullText: string, timestamp: string | null, line = 1): ExecutionRecord {
+  const detail = fullText.length > SUMMARY_LIMIT ? `${fullText.slice(0, SUMMARY_LIMIT).trimEnd()}\n… [truncated; ${fullText.length} characters in source]` : fullText;
   return record({ agent: 'Rio', timestamp, actionType: 'summary', target: basename(path), detail, status: 'unknown', outputLink: null, source: { path, line, excerpt: detail }, recordKind: 'summary', metadata: {} });
 }
 
+function opportunityParts(value: string): { company: string; role: string } {
+  const separator = /\s+[—–]\s+/.exec(value);
+  if (!separator) return { company: clean(value), role: '' };
+  return { company: clean(value.slice(0, separator.index)), role: clean(value.slice(separator.index + separator[0].length)) };
+}
+function confirmed(value: string, milestone: 'sent' | 'reply' | 'call' | 'sale'): boolean {
+  const text = clean(value).toLowerCase();
+  if (!text || /^(?:[-—–?]|n\/?a\b|none\b|false\b|0\b)/.test(text) || /\b(?:no|not|never|pending|awaiting|tbd|unknown|maybe)\b|\?/.test(text)) return false;
+  if (/^(?:yes|y|true|1|✓|✔|✅)$/.test(text) || parseDate(text)) return true;
+  if (milestone === 'sent') return /\b(?:sent|emailed|messaged|contacted)\b/.test(text);
+  if (milestone === 'reply') return /\b(?:replied|responded|reply|response)\b/.test(text) || text.length >= 8;
+  if (milestone === 'call') return /\b(?:booked|scheduled|confirmed)\b/.test(text);
+  return /\b(?:sold|sale|paid|won|closed)\b|(?:\b(?:pkr|usd|eur|gbp)\b|[$£€])\s*\d/.test(text);
+}
+function dentalStage(fields: Fields): string {
+  if (confirmed(get(fields, 'sale'), 'sale')) return 'Sale';
+  if (confirmed(get(fields, 'call booked'), 'call')) return 'Call booked';
+  if (confirmed(get(fields, 'reply'), 'reply')) return 'Reply';
+  if (confirmed(get(fields, 'sent'), 'sent')) return 'Sent';
+  return '';
+}
+
 function tableRecord(fields: Fields, kind: SourceKind, source: SourceRef, contextDate: string | null, diagnostics: Diagnostics): ExecutionRecord | null {
-  const company = clean(get(fields, 'company')), role = clean(get(fields, 'role')), person = clean(get(fields, 'person'));
-  const title = clean(get(fields, 'title', 'target', 'topic')), stage = clean(get(fields, 'stage'));
+  const opportunityText = kind === 'opportunities' ? clean(get(fields, 'opportunity')) : '';
+  const opportunity = opportunityParts(opportunityText);
+  const company = clean(get(fields, 'company') || opportunity.company), role = clean(get(fields, 'role') || opportunity.role), person = clean(get(fields, 'person'));
+  const title = clean(get(fields, 'title', 'target', 'topic'));
+  const explicitStage = clean(get(fields, 'stage'));
+  const derivedDentalStage = kind === 'dental' ? dentalStage(fields) : '';
+  const stage = kind === 'dental' ? explicitStage || derivedDentalStage : explicitStage || clean(get(fields, 'deadline status'));
+  const nextStep = clean(get(fields, 'next step'));
   const action = clean(get(fields, 'action')), detail = source.excerpt || Object.values(fields).join(' | ');
   if (isSummary(company || person || title)) return null;
-  const evidence = `${action} ${stage} ${get(fields, 'status')}`;
+  const classify = (value: string) => /assessment|take.home|test task|survey|intro video/i.test(value) ? 'assessment' : /interview/i.test(value) ? 'interview' : '';
+  const opportunityAction = classify(explicitStage) || classify(nextStep) || classify(stage) || classify(action);
   let actionType: string;
   if (kind === 'dental') actionType = 'dental_lead';
   else if (kind === 'social') actionType = 'social_post';
   else if (kind === 'linkedin' || /linkedin|connection|outreach|message|inmail/i.test(action)) actionType = 'linkedin_touch';
-  else if (/assessment|take.home|test task/i.test(evidence)) actionType = 'assessment';
-  else if (/interview/i.test(evidence)) actionType = 'interview';
-  else actionType = 'job_application';
-  const target = actionType === 'social_post' ? title : actionType === 'linkedin_touch' ? person || company : company ? [company, role].filter(Boolean).join(' — ') : person;
+  else actionType = opportunityAction || 'job_application';
+  const target = actionType === 'social_post' ? title : actionType === 'linkedin_touch' ? person || company : opportunityText || (company ? [company, role].filter(Boolean).join(' — ') : person);
   if (!target) { warn(diagnostics, source.sheet ? `${source.sheet} row ${source.row}` : `line ${source.line}`, 'missing identifiable target'); return null; }
   const snapshot = ['opportunities', 'dental', 'social'].includes(kind);
   const rawDate = snapshot ? get(fields, 'updated', 'date') : actionType === 'job_application' ? get(fields, 'appliedAt', 'date') : get(fields, 'date');
   const timestamp = rawDate ? parseDate(rawDate) : contextDate;
   if (rawDate && !timestamp) diagnostics.warnings.push(`${source.sheet ? `${source.sheet} row ${source.row}` : `line ${source.line}`}: unknown or invalid date ${JSON.stringify(rawDate)}`);
   const metadata: ExecutionRecord['metadata'] = {};
-  for (const [key, value] of Object.entries({ company, role, person, stage, platform: clean(get(fields, 'platform')), waitingOn: clean(get(fields, 'waitingOn')), waitingFor: clean(get(fields, 'waitingFor')), reply: clean(get(fields, 'reply')), blockedSince: parseDate(get(fields, 'blockedSince')), appliedAt: parseDate(get(fields, 'appliedAt')), updatedAt: parseDate(get(fields, 'updated')) })) if (value) metadata[key] = value;
+  for (const [key, value] of Object.entries({ company, role, person, stage, platform: clean(get(fields, 'platform')), waitingOn: clean(get(fields, 'waitingOn', 'owner')), waitingFor: clean(get(fields, 'waitingFor', 'next step')), reply: clean(get(fields, 'reply')), blockedSince: parseDate(get(fields, 'blockedSince')), appliedAt: parseDate(get(fields, 'appliedAt')), updatedAt: parseDate(get(fields, 'updated')) })) if (value) metadata[key] = typeof value === 'string' ? value.slice(0, 4000) : value;
   if (actionType === 'linkedin_touch' && (get(fields, 'touchType') || touchType(action))) metadata.touchType = get(fields, 'touchType') || touchType(action);
   if (get(fields, 'eventId')) metadata.eventId = get(fields, 'eventId');
   const explicit = get(fields, 'status');
-  return record({ agent: clean(get(fields, 'agent')) || 'Rio', timestamp, actionType, target, detail, status: statusOf(explicit || evidence), outputLink: explicitLink(get(fields, 'link')) || linkOf(detail), source, metadata, recordKind: ['opportunities', 'dental', 'social'].includes(kind) ? 'snapshot' : 'execution' });
+  const deadlineState = statusOf(get(fields, 'deadline status'));
+  let status: Status;
+  if (explicit) status = statusOf(explicit);
+  else if (kind === 'dental' && !explicitStage && derivedDentalStage) status = derivedDentalStage === 'Sale' ? 'success' : 'pending';
+  else if (explicitStage) status = statusOf(explicitStage);
+  else if (deadlineState === 'failed' || deadlineState === 'blocked') status = deadlineState;
+  else status = statusOf(nextStep || stage || action);
+  return record({ agent: clean(get(fields, 'agent')) || 'Rio', timestamp, actionType, target, detail, status, outputLink: explicitLink(get(fields, 'link')) || linkOf(detail), source, metadata, recordKind: ['opportunities', 'dental', 'social'].includes(kind) ? 'snapshot' : 'execution' });
 }
 
 function bulletRecord(text: string, kind: SourceKind, source: SourceRef, date: string | null, diagnostics: Diagnostics): ExecutionRecord | null {
@@ -155,6 +191,43 @@ function bulletRecord(text: string, kind: SourceKind, source: SourceRef, date: s
   return record({ agent: 'Rio', actionType, target, timestamp, status: statusOf(fields.status || plain), detail: source.excerpt || text, outputLink: linkOf(text), source, metadata, recordKind: ['dental', 'social', 'opportunities'].includes(kind) ? 'snapshot' : 'execution' });
 }
 
+function timedLinkedInRecord(text: string, source: SourceRef, date: string | null): ExecutionRecord | null {
+  const values = cells(text.replace(/^\s*[-*+]\s+/, ''));
+  if (values.length < 5 || !/^\d{1,2}:\d{2}\s+PKT$/i.test(values[0])) return null;
+  const person = clean(values[1].replace(/\s*\([^)]*\)\s*$/, ''));
+  const context = values[1].match(/\(([^)]*)\)\s*$/)?.[1] || '';
+  const company = clean(context.includes(',') ? context.split(',').slice(1).join(',') : '');
+  const lastCell = values.at(-1) || '';
+  const hasLinkCell = values.length >= 6 && (Boolean(linkOf(lastCell)) || /^(?:n\/?a|none|[-—–]|)$/i.test(lastCell.trim()));
+  const activity = clean(values[values.length - (hasLinkCell ? 2 : 1)]);
+  if (!person || !activity) return null;
+  const completedTouch = /\b(liked|commented|reposted|shared|messaged|sent|connected)\b/i.test(activity) && !/\b(?:not|never|no)\s+(?:liked|commented|reposted|shared|messaged|sent|connected)\b/i.test(activity);
+  const metadata: ExecutionRecord['metadata'] = { person };
+  if (company) metadata.company = company.slice(0, 4000);
+  const type = /commented/i.test(activity) ? 'comment' : /liked/i.test(activity) ? 'like' : touchType(activity);
+  if (type) metadata.touchType = type;
+  const typeCell = values[values.length - (hasLinkCell ? 3 : 2)];
+  if (typeCell) metadata.type = clean(typeCell).slice(0, 4000);
+  return record({ agent: 'Rio', timestamp: date, actionType: 'linkedin_touch', target: person, detail: source.excerpt || text,
+    status: completedTouch ? 'success' : statusOf(activity), outputLink: linkOf(values.at(-1) || '') || linkOf(text), source,
+    recordKind: 'execution', metadata });
+}
+
+function planSlotRecord(heading: string, body: string[], source: SourceRef, date: string | null): ExecutionRecord | null {
+  const match = heading.match(/^#{2,6}\s+\d{1,2}:\d{2}\s+[—–-]\s+(.+?)\s+\(([^)]+)\)\s+[—–-]\s+(READY|BLOCKED|PUBLISHED)\s*$/i);
+  if (!match) return null;
+  const target = clean(match[1]);
+  if (!target) return null;
+  const label = clean(match[2]);
+  const platform = /\binstagram\b/i.test(label) ? 'Instagram' : /\blinkedin\b/i.test(label) ? 'LinkedIn' : label.split(/\s+/)[0];
+  const status: Status = match[3].toUpperCase() === 'PUBLISHED' ? 'published' : match[3].toUpperCase() === 'BLOCKED' ? 'blocked' : 'planned';
+  const detail = [heading, ...body].join('\n').slice(0, 16000);
+  const metadata: ExecutionRecord['metadata'] = { platform, stage: match[3].toUpperCase() };
+  if (status === 'blocked' && date) metadata.blockedSince = date;
+  return record({ agent: 'Rio', timestamp: date, actionType: 'social_post', target, detail, status,
+    outputLink: linkOf(detail), source, recordKind: 'snapshot', metadata });
+}
+
 function parseMarkdown(text: string, path: string, kind: SourceKind, diagnostics: Diagnostics): ExecutionRecord[] {
   if (kind === 'memory') return text.trim() ? [summary(path, text.trim(), parseDate(basename(path)))] : [];
   const lines = text.replace(/^\uFEFF/, '').split(/\r?\n/);
@@ -164,6 +237,15 @@ function parseMarkdown(text: string, path: string, kind: SourceKind, diagnostics
     const line = lines[i], trimmed = line.trim();
     if (/^```|^~~~/.test(trimmed)) { fenced = !fenced; continue; }
     if (fenced || !trimmed) { if (!trimmed) headings = null; continue; }
+    if (kind === 'social' && /^#{2,6}\s+\d{1,2}:\d{2}\s+[—–-]/.test(trimmed)) {
+      let end = i + 1;
+      while (end < lines.length && !/^#{1,6}\s/.test(lines[end].trim())) end++;
+      const source = { path, line: i + 1, excerpt: line };
+      const folder = basename(dirname(path));
+      const slotDate = /^\d{4}-\d{2}-\d{2}$/.test(folder) ? parseDate(folder) : null;
+      const parsed = planSlotRecord(trimmed, lines.slice(i + 1, end).map(value => value.trim()).filter(Boolean), source, slotDate);
+      if (parsed) { records.push(parsed); i = end - 1; headings = null; continue; }
+    }
     if (/^#{1,6}\s/.test(trimmed)) { const parsed = parseDate(trimmed); if (parsed || /\d{4}|\d{1,2}\/\d/.test(trimmed)) date = parsed; headings = null; continue; }
     if (/^(?:\d{4}-\d{2}-\d{2}|\d{1,2}\s+[A-Za-z]+\s+\d{4}|[A-Za-z]+\s+\d{1,2},?\s+\d{4})$/.test(trimmed)) { date = parseDate(trimmed); headings = null; continue; }
     const source = { path, line: i + 1, excerpt: line };
@@ -180,7 +262,8 @@ function parseMarkdown(text: string, path: string, kind: SourceKind, diagnostics
       }
     }
     if (/^\s*(?:[-*+]\s|\d+[.)]\s)/.test(line)) {
-      const parsed = bulletRecord(line, kind, source, date, diagnostics); if (parsed) records.push(parsed); else warn(diagnostics, `line ${i + 1}`, 'unrecognized activity; retained in source only');
+      const parsed = kind === 'linkedin' ? timedLinkedInRecord(line, source, date) || bulletRecord(line, kind, source, date, diagnostics) : bulletRecord(line, kind, source, date, diagnostics);
+      if (parsed) records.push(parsed); else warn(diagnostics, `line ${i + 1}`, 'unrecognized activity; retained in source only');
     }
   }
   return records;
@@ -208,7 +291,7 @@ async function parseWorkbook(buffer: Buffer, path: string, diagnostics: Diagnost
       if (!values.some(v => v.trim())) return;
       if (!headings) {
         const candidate = values.map(header);
-        if (candidate.includes('company') || candidate.includes('person')) headings = candidate;
+        if (candidate.includes('company') || candidate.includes('person') || candidate.includes('opportunity')) headings = candidate;
         else warn(diagnostics, `${sheet.name} row ${rowNumber}`, 'no recognized header');
         return;
       }
