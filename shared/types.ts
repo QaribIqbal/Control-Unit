@@ -32,7 +32,9 @@ export interface DashboardData {
   linkedinDaily: { date: string; count: number; recordIds: string[] }[];
   dentalStages: { stage: string; count: number; recordIds: string[] }[];
   socialPlatforms: { platform: string; planned: number; published: number; blocked: number; recordIds: string[]; plannedIds: string[]; publishedIds: string[] }[];
-  entities: { interviews: ExecutionRecord[]; assessments: ExecutionRecord[]; dental: ExecutionRecord[]; social: ExecutionRecord[] };
+  applicationsDaily: { date: string; count: number; recordIds: string[] }[];
+  applicationStages: { stage: string; count: number; recordIds: string[] }[];
+  entities: { applications: ExecutionRecord[]; interviews: ExecutionRecord[]; assessments: ExecutionRecord[]; dental: ExecutionRecord[]; social: ExecutionRecord[] };
   stale: { recordId: string; daysWaiting: number; waitingOn: string }[];
   verification: { recordId: string; reason: string }[];
   analysis: { configured: boolean; model: string; callsToday: number; dailyLimit: number };

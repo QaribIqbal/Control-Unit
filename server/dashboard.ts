@@ -53,6 +53,7 @@ export function verificationFlags(records: ExecutionRecord[], allowedRoots: stri
   }
   return flags;
 }
+const applicationStage = (r: ExecutionRecord) => String(r.metadata.stage || '').trim() || (completed(r) ? 'Applied' : r.status.replaceAll('_', ' '));
 export function buildDashboard(records: ExecutionRecord[], sources: SourceReport[], options: { now?: Date; timezone?: string; allowedRoots?: string[]; configured?: boolean; model?: string; callsToday?: number; dailyLimit?: number } = {}): DashboardData {
   const now = options.now || new Date(); const timezone = options.timezone || 'Asia/Karachi';
   const today = dayKey(now.toISOString(), timezone);
@@ -70,6 +71,7 @@ export function buildDashboard(records: ExecutionRecord[], sources: SourceReport
     const state = opportunityStates.get(`${r.agent}|${norm(r.entityKey)}`)!;
     return state;
   }).sort(stateNewest);
+  const applicationEntities = latestEntities(opportunityFacts.filter(r => r.actionType === 'job_application'));
   const interviews = pipeline('interview');
   const assessments = pipeline('assessment');
   const dental = latestEntities(facts.filter(r => r.actionType === 'dental_lead'));
@@ -105,7 +107,9 @@ export function buildDashboard(records: ExecutionRecord[], sources: SourceReport
     agents: names.map(name => { const rows = sorted.filter(r => r.agent === name); const current = latestEntities(rows.filter(r => r.recordKind !== 'summary'));
       return { name, lastRun: rows.find(r => r.timestamp)?.timestamp || null, latestOutput: rows.find(r => r.actionType === 'output' || completed(r) && r.recordKind !== 'summary' && r.actionType !== 'run') || null,
         failed: current.filter(r => r.status === 'failed').map(r => r.id), blocked: current.filter(r => r.status === 'blocked').map(r => r.id), recordIds: rows.map(r => r.id) }; }),
+    applicationsDaily: Array.from({ length: 14 }, (_, i) => { const date = new Date(utcToday.getTime() - (13-i)*86400000).toISOString().slice(0, 10); const rows = apps.filter(r => r.timestamp && dayKey(r.timestamp, timezone) === date); return { date, count: rows.length, recordIds: rows.map(r => r.id) }; }),
+    applicationStages: [...new Set(applicationEntities.map(applicationStage))].sort().map(stage => { const rows = applicationEntities.filter(r => applicationStage(r) === stage); return { stage, count: rows.length, recordIds: rows.map(r => r.id) }; }),
     linkedinDaily: Array.from({ length: 14 }, (_, i) => { const date = new Date(utcToday.getTime() - (13-i)*86400000).toISOString().slice(0, 10); const rows = linkedin.filter(r => r.timestamp && dayKey(r.timestamp, timezone) === date); return { date, count: rows.length, recordIds: rows.map(r => r.id) }; }),
-    dentalStages, socialPlatforms, entities: { interviews, assessments, dental, social }, stale,
+    dentalStages, socialPlatforms, entities: { applications: applicationEntities, interviews, assessments, dental, social }, stale,
     verification: verificationFlags(sorted, options.allowedRoots), analysis: { configured: options.configured || false, model: options.model || 'gpt-4.1-mini', callsToday: options.callsToday || 0, dailyLimit: options.dailyLimit ?? 20 } };
 }
