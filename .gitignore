@@ -1,0 +1,14 @@
+node_modules/
+dist/
+data/
+inbox/
+.env
+.env.*
+!.env.example
+coverage/
+.superpowers/
+*.log
+.DS_Store
+.vercel/
+.netlify/
+.vercel

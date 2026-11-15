@@ -1,0 +1,8 @@
+.env
+.env.*
+data/
+inbox/
+tests/
+docs/
+.superpowers/
+.netlify/
