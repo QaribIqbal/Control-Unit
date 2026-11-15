@@ -16,6 +16,16 @@ beforeEach(async () => { home = await mkdtemp(join(tmpdir(), 'rio-import-test-')
 afterEach(async () => { await rm(home, { recursive: true, force: true }); });
 
 describe('read-only Rio imports', () => {
+  it('names the file and quotes the line for each skipped entry in a multi-file source', async () => {
+    await file('d/2026-11-01/PLAN.md', '# Plan\n- some stray note about nothing\n');
+    await file('d/2026-11-02/PLAN.md', '# Plan\n- another stray note\n');
+    const result = await importRio({ home, paths: { social: join(home, 'd/*/PLAN.md') }, now });
+    const message = result.sources.find(s => s.kind === 'social')!.message;
+    expect(message).toContain('2026-11-01/PLAN.md line 2');
+    expect(message).toContain('"- some stray note about nothing"');
+    expect(message).toContain('2026-11-02/PLAN.md line 2');
+  });
+
   it('truncates oversized daily memory summaries so snapshots stay valid', async () => {
     const path = await file('memory/2026-11-14.md', `# Daily\n${'x'.repeat(170000)}\n`);
     const result = await importRio({ home, paths: { memory: path }, now });

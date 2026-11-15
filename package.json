@@ -11,6 +11,7 @@
     "build": "tsc --noEmit && vite build",
     "start": "tsx server/index.ts --production",
     "import": "tsx server/cli.ts",
+    "diagnose": "tsx server/diagnose-cli.ts",
     "collector": "tsx server/collector-cli.ts",
     "collector:watch": "tsx server/collector-cli.ts --watch",
     "check:deployment": "node scripts/check-deployment.mjs",

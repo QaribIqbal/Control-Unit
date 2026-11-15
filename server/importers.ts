@@ -87,6 +87,7 @@ function touchType(text: string): string {
   if (/reply|replied/i.test(text)) return 'reply';
   return /message|messaged|outreach/i.test(text) ? 'message' : '';
 }
+const snippet = (line: string) => JSON.stringify(clean(line).slice(0, 110));
 function warn(d: Diagnostics, location: string, message: string) { d.skipped += 1; d.warnings.push(`${location}: ${message}`); }
 function entityFor(type: string, target: string, metadata: ExecutionRecord['metadata']): string {
   if (['job_application', 'interview', 'assessment'].includes(type)) return `application:${normalize(String(metadata.company || target))}:${normalize(String(metadata.role || ''))}`;
@@ -254,7 +255,7 @@ function parseMarkdown(text: string, path: string, kind: SourceKind, diagnostics
       if (values.every(v => /^:?-{3,}:?$/.test(v))) continue;
       if (i + 1 < lines.length && cells(lines[i + 1]).every(v => /^:?-{3,}:?$/.test(v))) { headings = values.map(header); continue; }
       if (headings) {
-        if (values.length !== headings.length) { warn(diagnostics, `line ${i + 1}`, 'table column count differs from header'); continue; }
+        if (values.length !== headings.length) { warn(diagnostics, `line ${i + 1}`, `table column count differs from header (${values.length} cells, expected ${headings.length}): ${snippet(line)}`); continue; }
         const fields = Object.fromEntries(headings.map((h, index) => [h, values[index]]));
         if (isSummary(values[0])) { diagnostics.skipped++; continue; }
         const parsed = tableRecord(fields, kind, source, date, diagnostics); if (parsed) records.push(parsed);
@@ -263,7 +264,7 @@ function parseMarkdown(text: string, path: string, kind: SourceKind, diagnostics
     }
     if (/^\s*(?:[-*+]\s|\d+[.)]\s)/.test(line)) {
       const parsed = kind === 'linkedin' ? timedLinkedInRecord(line, source, date) || bulletRecord(line, kind, source, date, diagnostics) : bulletRecord(line, kind, source, date, diagnostics);
-      if (parsed) records.push(parsed); else warn(diagnostics, `line ${i + 1}`, 'unrecognized activity; retained in source only');
+      if (parsed) records.push(parsed); else warn(diagnostics, `line ${i + 1}`, `unrecognized activity; retained in source only: ${snippet(line)}`);
     }
   }
   return records;
@@ -333,6 +334,15 @@ async function filesFor(pattern: string): Promise<string[]> {
   }
   return paths.sort();
 }
+function clampMessage(warnings: string[], limit = 60000): string {
+  let text = '';
+  for (let i = 0; i < warnings.length; i++) {
+    const next = text ? `${text}\n${warnings[i]}` : warnings[i];
+    if (next.length > limit - 80) return `${text}\n… ${warnings.length - i} more diagnostics omitted`;
+    text = next;
+  }
+  return text;
+}
 async function sourceImport(path: string, kind: SourceKind, now: Date, workbook = false): Promise<ImportResult> {
   const report: SourceReport = { path, kind, status: 'ok', records: 0, skipped: 0, message: '', importedAt: now.toISOString() };
   const diagnostics: Diagnostics = { skipped: 0, warnings: [] }, records: ExecutionRecord[] = [];
@@ -341,15 +351,17 @@ async function sourceImport(path: string, kind: SourceKind, now: Date, workbook 
   catch (error) { report.status = isMissing(error) ? 'missing' : 'error'; report.message = errorMessage(error); return { records, sources: [report] }; }
   if (!files.length) { report.status = 'missing'; report.message = 'No matching source files'; }
   for (const file of files) {
+    const firstWarning = diagnostics.warnings.length;
     try {
       const buffer = await readFile(file);
       const parsed = workbook ? await parseWorkbook(buffer, file, diagnostics) : parseMarkdown(buffer.toString('utf8'), file, kind, diagnostics);
       records.push(...parsed);
       if (!parsed.length) diagnostics.warnings.push(`${file}: no recognized records; empty or unparseable source`);
     } catch (error) { report.status = isMissing(error) && files.length === 1 ? 'missing' : 'error'; diagnostics.warnings.push(`${file}: ${errorMessage(error)}`); }
+    if (files.length > 1) for (let w = firstWarning; w < diagnostics.warnings.length; w++) if (!diagnostics.warnings[w].startsWith(file)) diagnostics.warnings[w] = `${file} ${diagnostics.warnings[w]}`;
   }
   report.records = records.length; report.skipped = diagnostics.skipped;
-  report.message = diagnostics.warnings.length ? diagnostics.warnings.join('\n') : report.message || `Imported ${records.length} records read-only`;
+  report.message = diagnostics.warnings.length ? clampMessage(diagnostics.warnings) : report.message || `Imported ${records.length} records read-only`;
   return { records, sources: [report] };
 }
 
