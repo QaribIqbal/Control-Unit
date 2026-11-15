@@ -13,6 +13,6 @@
 ## Tasks
 
 - [x] Connect the Vercel project to `QaribIqbal/Control-Unit` and verify `main` is its production branch.
-- [ ] Add `.github/workflows/ci.yml` with `npm ci`, `npm test`, and `npm run build` on pushes and pull requests.
-- [ ] Document the automatic deployment path and secret boundary.
+- [x] Add `.github/workflows/ci.yml` with `npm ci`, `npm test`, and `npm run build` on pushes and pull requests.
+- [x] Document the automatic deployment path and secret boundary.
 - [ ] Run local checks, push to `main`, confirm the GitHub check and Vercel deployment for that commit, and probe the live API.
