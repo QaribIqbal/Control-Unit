@@ -18,13 +18,18 @@ writeFileSync(destination,
 console.log('Prepared handoff/rio/.env with collector settings only.');
 
 if (process.argv.includes('--verify')) {
+  const prepared = parse(readFileSync(destination));
+  if (prepared.CONTROL_UNIT_URL !== 'https://control-unit-iota.vercel.app' ||
+      prepared.COLLECTOR_ID !== 'rio-primary' || prepared.INGESTION_TOKEN !== token) {
+    throw new Error('Prepared collector file did not parse back to the expected settings.');
+  }
   const response = await fetch('https://control-unit-iota.vercel.app/api/executions', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${prepared.INGESTION_TOKEN}` },
     body: '{}',
   });
   if (response.status !== 400) {
     throw new Error(`Collector authentication check failed (HTTP ${response.status}).`);
   }
-  console.log('Hosted ingestion accepted the token; empty test record was rejected without storing data.');
+  console.log('Hosted ingestion accepted the token parsed from the prepared file; empty test record was rejected without storing data.');
 }
