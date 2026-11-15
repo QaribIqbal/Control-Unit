@@ -58,7 +58,7 @@ const NOT_DONE = new Set(['planned', 'pending', 'blocked']);
 /** A dated application record counts as applied unless it is planned/blocked or explicitly negated. "Pending"/"awaiting reply" means submitted and waiting, so it still counts. */
 const wasApplied = (r: ExecutionRecord) => {
   if (r.status === 'planned' || r.status === 'blocked') return false;
-  if (r.status === 'pending') return !/\b(?:not|never|no)\s+(?:yet\s+)?(?:submitted|applied|sent)\b|\b(?:unsent|unsubmitted|to apply|todo|to do|draft|queued)\b/i.test(`${r.detail} ${r.metadata.stage || ''}`);
+  if (r.status === 'pending') return !/\b(?:not|never|no)\s+(?:yet\s+)?(?:submitted|applied|sent)\b|\b(?:unsent|unsubmitted|to apply|todo|to do|draft|queued)\b/i.test(`${r.detail} ${r.source.excerpt || ''} ${r.metadata.stage || ''}`);
   return true;
 };
 const stageOf = (r: ExecutionRecord): Stage => {

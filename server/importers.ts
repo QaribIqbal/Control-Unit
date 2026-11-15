@@ -123,16 +123,36 @@ function entityFor(type: string, target: string, metadata: ExecutionRecord['meta
   if (type === 'social_post') return `social:${normalize(String(metadata.platform || 'unknown'))}:${normalize(target)}`;
   return `${type}:${normalize(target)}`;
 }
+/** Payload budget per record so a full collector snapshot stays well under the 3 MB sync cap. */
+export const RECORD_LIMITS = { detail: 84, cell: 20, longDetail: 600, summaryDetail: 1200, excerpt: 100, metadata: 300 };
+export function truncateText(text: string, limit: number): string {
+  if (text.length <= limit) return text;
+  return `${text.slice(0, limit).trimEnd()} … [truncated; ${text.length} characters in source]`;
+}
 function record(input: Omit<ExecutionRecord, 'id' | 'entityKey'>, entityKey?: string, id?: string): ExecutionRecord {
-  return { ...input, entityKey: entityKey || entityFor(input.actionType, input.target, input.metadata), id: id || `rio_${hash(JSON.stringify([input.agent, input.source.path, input.source.sheet, input.source.row || input.source.line, input.actionType, input.target, input.detail]))}` };
+  // Identity is computed from the full source content before trimming, so IDs stay stable and distinct.
+  const fullId = id || `rio_${hash(JSON.stringify([input.agent, input.source.path, input.source.sheet, input.source.row || input.source.line, input.actionType, input.target, input.detail]))}`;
+  const key = entityKey || entityFor(input.actionType, input.target, input.metadata);
+  const excerpt = input.source.excerpt;
+  // Log rows repeat the source row as detail; keep one short copy as detail and a slightly longer excerpt for the drawer.
+  const detailLimit = input.recordKind === 'summary' ? RECORD_LIMITS.summaryDetail : excerpt !== undefined && input.detail === excerpt ? RECORD_LIMITS.detail : RECORD_LIMITS.longDetail;
+  const metadata: ExecutionRecord['metadata'] = {};
+  for (const [k, v] of Object.entries(input.metadata)) metadata[k] = typeof v === 'string' ? truncateText(v, RECORD_LIMITS.metadata) : v;
+  // A table row's detail becomes a compact copy of its cells (each clipped), so the long note text is stored once, in the excerpt.
+  const compact = excerpt !== undefined && input.detail === excerpt && excerpt.includes('|') && excerpt.length > detailLimit
+    ? `${cells(excerpt).filter(Boolean).map(c => (c.length > RECORD_LIMITS.cell ? `${c.slice(0, RECORD_LIMITS.cell).trimEnd()}…` : c)).join(' | ')}`
+    : null;
+  // The compact copy marks clipped cells with "…"; the full-length note count is carried once, on the excerpt.
+  const detail = compact !== null ? (compact.length > detailLimit ? `${compact.slice(0, detailLimit).trimEnd()}…` : compact) : truncateText(input.detail, detailLimit);
+  return { ...input, metadata, detail, target: truncateText(input.target, 300),
+    source: excerpt === undefined ? input.source : { ...input.source, excerpt: truncateText(excerpt, RECORD_LIMITS.excerpt) },
+    entityKey: key, id: fullId };
 }
 function isSummary(text: string) {
   return /^(?:total|totals|summary|daily total|weekly total)\b/i.test(clean(text)) || /^\d+\s+(?:posts?|contacts?|messages?|applications?|leads?)\b/i.test(clean(text));
 }
-const SUMMARY_LIMIT = 4000;
 function summary(path: string, fullText: string, timestamp: string | null, line = 1): ExecutionRecord {
-  const detail = fullText.length > SUMMARY_LIMIT ? `${fullText.slice(0, SUMMARY_LIMIT).trimEnd()}\n… [truncated; ${fullText.length} characters in source]` : fullText;
-  return record({ agent: 'Rio', timestamp, actionType: 'summary', target: basename(path), detail, status: 'unknown', outputLink: null, source: { path, line, excerpt: detail }, recordKind: 'summary', metadata: {} });
+  return record({ agent: 'Rio', timestamp, actionType: 'summary', target: basename(path), detail: fullText, status: 'unknown', outputLink: null, source: { path, line, excerpt: fullText }, recordKind: 'summary', metadata: {} });
 }
 
 function opportunityParts(value: string): { company: string; role: string } {
