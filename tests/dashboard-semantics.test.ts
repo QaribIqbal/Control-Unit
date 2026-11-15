@@ -65,3 +65,16 @@ describe('social windows, linkedin counting, today strip', () => {
     expect(data.today.items.find(i => i.key === 'linkedin')?.count).toBe(2);
   });
 });
+
+describe('interview/assessment records keep their stage floor', () => {
+  it('does not show loose status text as Applied in the pipeline funnel', () => {
+    const data = buildDashboard([
+      rec({ actionType: 'interview', recordKind: 'snapshot', metadata: { stage: 'Waiting' }, entityKey: 'application:a' }),
+      rec({ actionType: 'assessment', recordKind: 'snapshot', metadata: { stage: 'pending' }, entityKey: 'application:b' }),
+      rec({ actionType: 'job_application', recordKind: 'snapshot', metadata: { stage: 'Watching (submitted)' }, entityKey: 'application:c' }),
+    ], [], { now });
+    const count = (stage: string) => data.pipelineStages.find(s => s.stage === stage)?.count;
+    expect([count('Interview'), count('Assessment'), count('Applied')]).toEqual([1, 1, 0]);
+    expect(data.entities.interviews).toHaveLength(1); // the watching row is an application, not an interview
+  });
+});

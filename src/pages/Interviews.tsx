@@ -1,6 +1,6 @@
 import type { PageProps } from "../ui";
 import { Chip, Empty, Funnel, Kpi, PageHeader, Panel, PipelineTable } from "../ui";
-import { staleIn, stageCounts } from "../modules";
+import { staleIn } from "../modules";
 
 export function Interviews({ data, open, timezone }: PageProps) {
   const { interviews, assessments } = data.entities;
@@ -18,7 +18,7 @@ export function Interviews({ data, open, timezone }: PageProps) {
         <Kpi label="Stale (3+ days)" value={empty ? null : stale.length} tone={stale.length ? "alert" : "ok"} hint="Waiting with no update" onClick={stale.length ? () => open(stale.map((s) => s.recordId), "Stale interviews & assessments") : undefined} />
       </div>
       {empty ? <Panel title="Pipeline"><Empty /></Panel> : (
-        <Panel title="By stage"><Funnel stages={stageCounts([...interviews, ...assessments])} open={open} title="Pipeline" /></Panel>
+        <Panel title="By stage"><Funnel stages={data.pipelineStages.filter((s) => s.stage !== "Applied")} open={open} title="Pipeline" /></Panel>
       )}
       <div className="split">
         <Panel title="Interviews" aside={<Chip>{interviews.length}</Chip>}>

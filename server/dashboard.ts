@@ -2,7 +2,7 @@ import { existsSync, realpathSync, statSync, accessSync, constants } from 'node:
 import { resolve, relative, isAbsolute } from 'node:path';
 import type { DashboardData, ExecutionRecord, SourceReport, Kpi } from '../shared/types.js';
 import { validTimestamp } from './model.js';
-import { STAGES, normalizeStage, type Stage } from '../shared/stages.js';
+import { STAGES, normalizeStage, applyActionFloor, type Stage } from '../shared/stages.js';
 
 export function dayKey(timestamp: string, timezone = 'Asia/Karachi'): string {
   if (/^\d{4}-\d{2}-\d{2}$/.test(timestamp)) return timestamp;
@@ -57,7 +57,7 @@ export function verificationFlags(records: ExecutionRecord[], allowedRoots: stri
 const NOT_DONE = new Set(['planned', 'pending', 'blocked']);
 const stageOf = (r: ExecutionRecord): Stage => {
   const fallback: Stage = r.actionType === 'interview' ? 'Interview' : r.actionType === 'assessment' ? 'Assessment' : 'Applied';
-  const stage = normalizeStage(r.metadata.stage, fallback);
+  const stage = applyActionFloor(normalizeStage(r.metadata.stage, fallback), r.actionType);
   return stage === fallback && r.status === 'failed' && !String(r.metadata.stage || '').trim() ? 'Closed' : stage;
 };
 const stageBuckets = (rows: ExecutionRecord[]) => STAGES.map(stage => { const group = rows.filter(r => stageOf(r) === stage); return { stage: stage as string, count: group.length, recordIds: group.map(r => r.id) }; });

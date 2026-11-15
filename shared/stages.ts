@@ -19,3 +19,9 @@ export function normalizeStage(text: unknown, fallback: Stage = 'Applied'): Stag
   return fallback;
 }
 export const isOpenStage = (stage: Stage) => stage !== 'Closed';
+
+/** Interview/assessment records are at least at that stage, whatever loose status text they carry. */
+export function applyActionFloor(stage: Stage, actionType: string): Stage {
+  if (stage === 'Applied' || stage === 'Screening') return actionType === 'interview' ? 'Interview' : actionType === 'assessment' ? 'Assessment' : stage;
+  return stage;
+}

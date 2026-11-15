@@ -53,7 +53,7 @@ describe('module summaries', () => {
   });
 
   it('shows social only when per-platform records exist', () => {
-    const data = buildDashboard([rec({ actionType: 'social_post', recordKind: 'snapshot', status: 'blocked', metadata: { platform: 'Instagram' }, target: 'Post', entityKey: 'social:instagram:post' })], [], { now });
+    const data = buildDashboard([rec({ actionType: 'social_post', recordKind: 'snapshot', status: 'blocked', timestamp: '2026-11-15', metadata: { platform: 'Instagram' }, target: 'Post', entityKey: 'social:instagram:post' })], [], { now });
     const s = moduleSummaries(data).find(m => m.id === 'social')!;
     expect(s.value).toBe(0); expect(s.alerts).toBe(1); expect(s.detail).toContain('1 blocked');
   });

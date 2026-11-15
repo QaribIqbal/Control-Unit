@@ -269,7 +269,7 @@ export default function App() {
           {MODULES.map(({ id, label }) => {
             const Icon = moduleIcons[id];
             return (
-              <a key={id} className={route === id ? "active" : ""} href={routeHref(id)} aria-current={route === id ? "page" : undefined}>
+              <a key={id} data-module={id} className={route === id ? "active" : ""} href={routeHref(id)} aria-current={route === id ? "page" : undefined}>
                 <Icon size={17} />
                 <span>{label}</span>
                 {id === "overview" && data && attentionCount(data) > 0 && <span className="nav-badge" aria-label={`${attentionCount(data)} need attention`}>{attentionCount(data)}</span>}
@@ -398,6 +398,7 @@ export default function App() {
             </div>
           ) : data ? (
             <>
+              <div key={route} className="page-enter" data-module={route}>
               {route === "overview" && <Overview {...pageProps(data)} />}
               {route === "applications" && <Applications {...pageProps(data)} />}
               {route === "interviews" && <Interviews {...pageProps(data)} />}
@@ -405,6 +406,7 @@ export default function App() {
               {route === "dental" && <Dental {...pageProps(data)} />}
               {route === "social" && <Social {...pageProps(data)} />}
               {route === "agents" && <Agents {...pageProps(data)} api={api} onLink={() => setLinkModal(true)} onSetup={() => setSetup(true)} refresh={() => void refresh()} refreshing={refreshing} />}
+              </div>
               <footer className="page-footer">
                 <span><ShieldCheck size={14} />{hosted ? "Synced execution evidence. Every result has a trail." : "Read-only source imports. Every result has a trail."}</span>
                 <span>{timezone}</span>

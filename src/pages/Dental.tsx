@@ -1,3 +1,4 @@
+import { ArrowUpRight } from "lucide-react";
 import type { PageProps } from "../ui";
 import { Empty, Funnel, Kpi, PageHeader, Panel, PipelineTable } from "../ui";
 import { staleIn } from "../modules";
@@ -18,6 +19,23 @@ export function Dental({ data, open, timezone }: PageProps) {
       <Panel title="Funnel" aside={<span className="quiet head-note">Latest recorded stage</span>}>
         {data.dentalStages.length ? <Funnel stages={data.dentalStages} open={open} title="Dental" /> : <Empty />}
       </Panel>
+      {data.dentalDaily.length > 0 && (
+        <Panel title="Daily outreach reported" aside={<span className="quiet head-note">From the daily summary lines</span>}>
+          <div className="table-scroll">
+            <table>
+              <thead><tr><th>Day</th><th>Sent</th><th>Replies</th><th>Calls booked</th><th>Sales</th><th>Evidence</th></tr></thead>
+              <tbody>
+                {[...data.dentalDaily].reverse().map((d) => (
+                  <tr key={d.date}>
+                    <td className="nowrap">{d.date}</td><td>{d.sent || "—"}</td><td>{d.replies || "—"}</td><td>{d.calls || "—"}</td><td>{d.sales || "—"}</td>
+                    <td><button className="icon-button" aria-label={`Inspect ${d.date}`} onClick={() => open(d.recordIds, `Dental · ${d.date}`)}><ArrowUpRight size={16} /></button></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </Panel>
+      )}
       <Panel title="Leads">
         <PipelineTable records={leads} open={open} timezone={timezone} stale={data.stale} dental />
       </Panel>

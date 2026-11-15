@@ -22,7 +22,7 @@ export function LinkedIn({ data, open, timezone }: PageProps) {
         <Kpi label="Today" value={todayKpi?.value ?? null} onClick={todayKpi ? () => open(todayKpi.recordIds, todayKpi.label) : undefined} />
         <Kpi label="Last 14 days" value={none ? null : last14} />
         <Kpi label="Total recorded" value={totalKpi?.value ?? null} onClick={totalKpi ? () => open(totalKpi.recordIds, totalKpi.label) : undefined} />
-        {[...kinds].slice(0, 3).map(([kind, ids]) => <Kpi key={kind} label={kind} value={ids.length} onClick={() => open(ids, `LinkedIn · ${kind}`)} />)}
+        {[...kinds].sort((a, b) => b[1].length - a[1].length).slice(0, 4).map(([kind, ids]) => <Kpi key={kind} label={kind} value={ids.length} onClick={() => open(ids, `LinkedIn · ${kind}`)} />)}
       </div>
       <Panel title="Touches per day" aside={<span className="quiet head-note">Last 14 days</span>}>
         {none ? <Empty /> : <Bars bars={daysToBars(data.linkedinDaily)} open={open} title="LinkedIn" />}

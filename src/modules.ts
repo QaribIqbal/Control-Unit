@@ -48,14 +48,32 @@ export const STALE_DAYS = 3;
 
 const sum = (bars: { count: number }[]) => bars.reduce((total, bar) => total + bar.count, 0);
 
+/** Client-side day key in the dashboard timezone (date-only strings pass through). */
+export function dayKeyIn(timestamp: string, timezone: string): string {
+  if (/^\d{4}-\d{2}-\d{2}$/.test(timestamp)) return timestamp;
+  try { return new Intl.DateTimeFormat("en-CA", { timeZone: timezone, year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(timestamp)); }
+  catch { return timestamp.slice(0, 10); }
+}
+/** Records per day over [today - back, today + forward], for mini charts. Counts only dated records. */
+export function perDay(rows: { id: string; timestamp: string | null }[], today: string, timezone: string, back: number, forward = 0): Bar[] {
+  const base = Date.parse(`${today}T00:00:00Z`);
+  return Array.from({ length: back + forward + 1 }, (_, i) => {
+    const date = new Date(base + (i - back) * 86400000).toISOString().slice(0, 10);
+    const ids = rows.filter((r) => r.timestamp && dayKeyIn(r.timestamp, timezone) === date).map((r) => r.id);
+    return { label: shortDate(date), count: ids.length, recordIds: ids };
+  });
+}
+
 export function moduleSummaries(data: DashboardData): ModuleSummary[] {
   const e = data.entities;
-  const pipelineIds = [...e.interviews, ...e.assessments].map((r) => r.id);
-  const pipelineStale = staleIn(data, pipelineIds).length;
-  const dentalStale = staleIn(data, e.dental.map((r) => r.id)).length;
+  const attentionIds = (kind: string, ids: Set<string>) => data.attention.filter((a) => a.kind === kind && ids.has(a.recordId)).length;
+  const pipelineIds = new Set([...e.interviews, ...e.assessments].map((r) => r.id));
+  const pipelineStale = attentionIds("stale", pipelineIds);
+  const dentalStale = attentionIds("stale", new Set(e.dental.map((r) => r.id)));
+  const socialBlockedToday = attentionIds("blocked", new Set(e.social.map((r) => r.id)));
+  const failedRuns = data.attention.filter((a) => a.kind === "failed").length;
   const socialBlocked = data.socialPlatforms.reduce((total, p) => total + p.blocked, 0);
   const socialPlanned = data.socialPlatforms.reduce((total, p) => total + p.planned, 0);
-  const agentProblems = data.agents.reduce((total, a) => total + a.failed.length + a.blocked.length, 0);
   const sourceProblems = data.sources.filter((s) => s.status === "error").length;
   const missing = data.sources.filter((s) => s.status === "missing").length;
   const tone = (value: number | null, alerts: number, warn = false): Tone => value === null ? "empty" : alerts > 0 ? "alert" : warn ? "warn" : "ok";
@@ -67,26 +85,29 @@ export function moduleSummaries(data: DashboardData): ModuleSummary[] {
   const liToday = kpiValue(data, "linkedin-today");
   const dental = kpiValue(data, "dental-total");
   const posts = kpiValue(data, "posts-week");
-  const hasSocial = data.entities.social.length > 0;
-  const unverified = data.verification.length;
+  const hasSocial = e.social.length > 0;
+  const noPipeline = interviews === null && assessments === null;
+  const today = data.today.date;
+  const socialBars = perDay(e.social, today, data.timezone, 6, 7);
+  const activityBars = perDay(data.records, today, data.timezone, 13);
   return [
-    { id: "applications", label: "Applications", value: apps, caption: "applied in total", bars: daysToBars(data.applicationsDaily),
+    { id: "applications", label: "Applications", value: apps, caption: "applications", bars: daysToBars(data.applicationsDaily),
       detail: apps === null ? "No data recorded" : `${week ?? 0} this week · ${sum(data.applicationsDaily)} in last 14 days`, alerts: 0, tone: tone(apps, 0) },
-    { id: "interviews", label: "Interviews & Assessments", value: interviews === null && assessments === null ? null : (interviews ?? 0) + (assessments ?? 0), caption: "open", bars: [],
-      detail: interviews === null && assessments === null ? "No data recorded" : `${interviews ?? 0} interviews · ${assessments ?? 0} assessments`, alerts: pipelineStale, tone: tone(interviews === null && assessments === null ? null : 1, pipelineStale) },
-    { id: "linkedin", label: "LinkedIn Outreach", value: li, caption: "touches recorded", bars: daysToBars(data.linkedinDaily),
+    { id: "interviews", label: "Interviews & Assessments", value: noPipeline ? null : (interviews ?? 0) + (assessments ?? 0), caption: "open", bars: data.pipelineStages.filter((s) => s.stage !== "Applied").map((s) => ({ label: s.stage, count: s.count, recordIds: s.recordIds })),
+      detail: noPipeline ? "No data recorded" : `${interviews ?? 0} interviews · ${assessments ?? 0} assessments`, alerts: pipelineStale, tone: tone(noPipeline ? null : 1, pipelineStale) },
+    { id: "linkedin", label: "LinkedIn Outreach", value: li, caption: "touches", bars: daysToBars(data.linkedinDaily),
       detail: li === null ? "No data recorded" : `${liToday ?? 0} today · ${sum(data.linkedinDaily)} in last 14 days`, alerts: 0, tone: tone(li, 0) },
-    { id: "dental", label: "Dental Leads", value: dental, caption: "leads tracked", bars: data.dentalStages.map((s) => ({ label: s.stage, count: s.count, recordIds: s.recordIds })),
-      detail: dental === null ? "No data recorded" : `${data.dentalStages.length} stages${dentalStale ? ` · ${dentalStale} stale` : ""}`, alerts: dentalStale, tone: tone(dental, dentalStale) },
-    { id: "social", label: "Social", value: hasSocial ? posts ?? 0 : null, caption: "published this week", bars: [],
-      detail: hasSocial ? `${socialPlanned} planned · ${socialBlocked} blocked` : "No data recorded", alerts: socialBlocked, tone: tone(hasSocial ? 1 : null, socialBlocked) },
-    { id: "agents", label: "Agents", value: data.agents.length ? data.agents.length : null, caption: data.agents.length === 1 ? "agent linked" : "agents linked", bars: [],
-      detail: !data.sources.length ? "No data recorded" : `${agentProblems + unverified} flagged · ${sourceProblems + missing} source issues`, alerts: agentProblems + unverified + sourceProblems, tone: tone(data.agents.length ? 1 : null, agentProblems + unverified + sourceProblems, missing > 0) },
+    { id: "dental", label: "Dental Leads", value: dental, caption: "leads", bars: data.dentalStages.map((s) => ({ label: s.stage, count: s.count, recordIds: s.recordIds })),
+      detail: dental === null ? "No data recorded" : `${data.dentalStages.length} stage${data.dentalStages.length === 1 ? "" : "s"}${dentalStale ? ` · ${dentalStale} stale` : ""}`, alerts: dentalStale, tone: tone(dental, dentalStale) },
+    { id: "social", label: "Social", value: hasSocial ? posts ?? 0 : null, caption: "published, 7 days", bars: socialBars,
+      detail: hasSocial ? `${socialPlanned} upcoming · ${socialBlocked} blocked` : "No data recorded", alerts: socialBlockedToday, tone: tone(hasSocial ? 1 : null, socialBlockedToday) },
+    { id: "agents", label: "Agents", value: data.agents.length ? data.agents.length : null, caption: data.agents.length === 1 ? "agent" : "agents", bars: activityBars,
+      detail: !data.sources.length ? "No data recorded" : `${data.records.length.toLocaleString()} records · ${sourceProblems + missing} source issue${sourceProblems + missing === 1 ? "" : "s"}`, alerts: failedRuns + sourceProblems, tone: tone(data.agents.length ? 1 : null, failedRuns + sourceProblems, missing > 0) },
   ];
 }
 
 export function attentionCount(data: DashboardData): number {
-  return data.stale.length + data.verification.length;
+  return data.attention.length;
 }
 export function barMax(bars: { count: number }[]): number {
   return Math.max(1, ...bars.map((b) => b.count));
