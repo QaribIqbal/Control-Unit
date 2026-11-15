@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { buildDashboard } from '../server/dashboard.js';
 import { normalizeStage } from '../shared/stages.js';
+import { mkdtemp, writeFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { importRio } from '../server/importers.js';
+import { validateSnapshot } from '../server/sync.js';
 import type { ExecutionRecord } from '../shared/types.js';
 
 const now = new Date('2026-11-15T12:00:00Z');
@@ -76,5 +81,27 @@ describe('interview/assessment records keep their stage floor', () => {
     const count = (stage: string) => data.pipelineStages.find(s => s.stage === stage)?.count;
     expect([count('Interview'), count('Assessment'), count('Applied')]).toEqual([1, 1, 0]);
     expect(data.entities.interviews).toHaveLength(1); // the watching row is an application, not an interview
+  });
+});
+
+describe('regression: dated applications reach the daily series end to end', () => {
+  it('buckets every dated row of a multi-day log, including pending/awaiting statuses, after a sync round trip', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'apps-log-'));
+    try {
+      const path = join(dir, 'applied-log.md');
+      await writeFile(path, `# Applied log\n| Date | Company | Role | Platform | Status |\n|---|---|---|---|---|\n` + [
+        ['2026-11-15', 'Acme', 'Engineer', 'Applied'], ['2026-11-15', 'Acme2', 'Engineer', 'Pending'],
+        ['2026-11-14', 'Beta', 'Designer', 'Submitted — awaiting response'], ['2026-11-13', 'Gamma', 'PM', 'Applied, no reply yet'],
+        ['2026-11-12', 'Delta', 'Dev', 'Applied (confirmation email)'], ['2026-11-11', 'Eps', 'QA', ''],
+        ['2026-11-11', 'Zed', 'QA', 'Not submitted yet'], ['2026-10-01', 'Old', 'Ops', 'Applied'],
+      ].map(r => `| ${r[0]} | ${r[1]} | ${r[2]} | Site | ${r[3]} |`).join('\n') + '\n');
+      const imported = await importRio({ home: dir, paths: { applications: path }, now });
+      const snapshot = validateSnapshot({ collectorId: 'rio-test', records: imported.records, sources: imported.sources.filter(s => s.kind === 'applications') });
+      const data = buildDashboard(snapshot.records, snapshot.sources, { now });
+      const byDate = Object.fromEntries(data.applicationsDaily.filter(d => d.count).map(d => [d.date, d.count]));
+      expect(byDate).toEqual({ '2026-11-11': 1, '2026-11-12': 1, '2026-11-13': 1, '2026-11-14': 1, '2026-11-15': 2 });
+      expect(data.kpis.find(k => k.id === 'applications-week')?.value).toBe(6);
+      expect(data.kpis.find(k => k.id === 'applications-total')?.value).toBe(8);
+    } finally { await rm(dir, { recursive: true, force: true }); }
   });
 });

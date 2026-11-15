@@ -55,6 +55,12 @@ export function verificationFlags(records: ExecutionRecord[], allowedRoots: stri
   return flags;
 }
 const NOT_DONE = new Set(['planned', 'pending', 'blocked']);
+/** A dated application record counts as applied unless it is planned/blocked or explicitly negated. "Pending"/"awaiting reply" means submitted and waiting, so it still counts. */
+const wasApplied = (r: ExecutionRecord) => {
+  if (r.status === 'planned' || r.status === 'blocked') return false;
+  if (r.status === 'pending') return !/\b(?:not|never|no)\s+(?:yet\s+)?(?:submitted|applied|sent)\b|\b(?:unsent|unsubmitted|to apply|todo|to do|draft|queued)\b/i.test(`${r.detail} ${r.metadata.stage || ''}`);
+  return true;
+};
 const stageOf = (r: ExecutionRecord): Stage => {
   const fallback: Stage = r.actionType === 'interview' ? 'Interview' : r.actionType === 'assessment' ? 'Assessment' : 'Applied';
   const stage = applyActionFloor(normalizeStage(r.metadata.stage, fallback), r.actionType);
@@ -75,7 +81,7 @@ export function buildDashboard(records: ExecutionRecord[], sources: SourceReport
   // One concept: an application is a distinct company + role with any application record. Dated events feed the day series.
   const opportunityFacts = facts.filter(r => ['job_application', 'interview', 'assessment'].includes(r.actionType));
   const applicationEntities = latestEntities(opportunityFacts.filter(r => r.actionType === 'job_application'));
-  const appliedEvents = (() => { const seen = new Set<string>(); return events.filter(r => r.actionType === 'job_application' && !NOT_DONE.has(r.status) && dayOf(r)).filter(r => { const key = `${norm(r.entityKey)}|${dayOf(r)}`; if (seen.has(key)) return false; seen.add(key); return true; }); })();
+  const appliedEvents = (() => { const seen = new Set<string>(); return events.filter(r => r.actionType === 'job_application' && wasApplied(r) && dayOf(r)).filter(r => { const key = `${norm(r.entityKey)}|${dayOf(r)}`; if (seen.has(key)) return false; seen.add(key); return true; }); })();
   const linkedin = events.filter(r => r.actionType === 'linkedin_touch' && !NOT_DONE.has(r.status) && r.status !== 'failed');
   const opportunityStates = new Map<string, ExecutionRecord>();
   for (const r of [...opportunityFacts].sort(stateNewest)) { const key = `${r.agent}|${norm(r.entityKey)}`; if (!opportunityStates.has(key)) opportunityStates.set(key, r); }
