@@ -15,7 +15,7 @@ const hash = (s: string) => createHash('sha256').update(s).digest('hex').slice(0
 const get = (f: Fields, ...keys: string[]) => keys.map(k => f[k]).find(v => v?.trim())?.trim() || '';
 const aliases: Record<string, string> = {
   employer: 'company', organisation: 'company', organization: 'company', practice: 'company', clinic: 'company', client: 'company',
-  position: 'role', 'job title': 'role', 'job role': 'role', 'contact name': 'person', contact: 'person', name: 'person',
+  position: 'role', job: 'role', 'job title': 'role', 'job role': 'role', 'contact name': 'person', contact: 'person', name: 'person',
   state: 'status', outcome: 'status', 'current stage': 'stage', 'pipeline stage': 'stage',
   'applied': 'appliedAt', 'applied on': 'appliedAt', 'applied date': 'appliedAt', 'application date': 'appliedAt', 'date applied': 'appliedAt', 'sent on': 'date', day: 'date',
   'updated at': 'updated', 'last updated': 'updated', 'last activity': 'updated', timestamp: 'date',
@@ -279,7 +279,7 @@ function parseMarkdown(text: string, path: string, kind: SourceKind, diagnostics
   if (kind === 'memory') return text.trim() ? [summary(path, text.trim(), parseDate(basename(path)))] : [];
   const lines = text.replace(/^\uFEFF/, '').split(/\r?\n/);
   const records: ExecutionRecord[] = [];
-  let date: string | null = null, headings: string[] | null = null, fenced = false;
+  let date: string | null = null, headings: string[] | null = null, lastHeadings: string[] | null = null, fenced = false;
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i], trimmed = line.trim();
     if (/^```|^~~~/.test(trimmed)) { fenced = !fenced; continue; }
@@ -299,7 +299,10 @@ function parseMarkdown(text: string, path: string, kind: SourceKind, diagnostics
     if (line.includes('|')) {
       const values = cells(line);
       if (values.every(v => /^:?-{3,}:?$/.test(v))) continue;
-      if (i + 1 < lines.length && cells(lines[i + 1]).every(v => /^:?-{3,}:?$/.test(v))) { headings = values.map(header); continue; }
+      if (i + 1 < lines.length && cells(lines[i + 1]).every(v => /^:?-{3,}:?$/.test(v))) { headings = lastHeadings = values.map(header); continue; }
+      // A pipe-delimited row after a blank line or heading resumes the last table header until a new header row appears.
+      if (!headings && trimmed.startsWith('|') && lastHeadings) headings = lastHeadings;
+      if (!headings && trimmed.startsWith('|')) { warn(diagnostics, `line ${i + 1}`, `table row with no header row above it: ${snippet(line)}`); continue; }
       if (headings) {
         if (values.length > headings.length) values.splice(headings.length - 1, values.length - headings.length + 1, values.slice(headings.length - 1).join(' | '));
         if (values.length !== headings.length) { warn(diagnostics, `line ${i + 1}`, `table column count differs from header (${values.length} cells, expected ${headings.length}): ${snippet(line)}`); continue; }

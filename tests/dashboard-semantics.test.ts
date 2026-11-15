@@ -105,3 +105,56 @@ describe('regression: dated applications reach the daily series end to end', () 
     } finally { await rm(dir, { recursive: true, force: true }); }
   });
 });
+
+describe('regression: applied-log blocks after blank lines are read', () => {
+  it('keeps the active header across blank lines so later November rows reach the day series', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'apps-blocks-'));
+    try {
+      const path = join(dir, 'applied-log.md');
+      await writeFile(path, [
+        '# Applied log', '', 'Notes before the table.',
+        '| Date | Job | Company | Source | Status | Notes |', '|---|---|---|---|---|---|',
+        '| 2026-10-05 | Engineer | Early Co | LinkedIn | Applied | |',
+        '| 2026-10-06 | Analyst | Second Co | Site | Applied | |',
+        '',
+        '| 2026-11-13 | Designer | Later Co | Site | Applied | |',
+        '| 2026-11-14 | PM | Latest Co | Site | Submitted | |',
+        '',
+        '## Week of Nov 15',
+        '| 2026-11-15 | QA | Today Co | Site | Applied | |',
+      ].join('\n'));
+      const imported = await importRio({ home: dir, paths: { applications: path }, now });
+      const report = imported.sources.find(s => s.kind === 'applications')!;
+      expect(report.records).toBe(5);
+      expect(report.skipped).toBe(0);
+      expect(imported.records.find(r => r.metadata.company === 'Later Co')).toMatchObject({ timestamp: '2026-11-13', metadata: { role: 'Designer' } });
+      const data = buildDashboard(imported.records, imported.sources, { now });
+      const byDate = Object.fromEntries(data.applicationsDaily.filter(d => d.count).map(d => [d.date, d.count]));
+      expect(byDate).toEqual({ '2026-11-13': 1, '2026-11-14': 1, '2026-11-15': 1 });
+      expect(data.kpis.find(k => k.id === 'applications-total')?.value).toBe(5);
+    } finally { await rm(dir, { recursive: true, force: true }); }
+  });
+
+  it('reports pipe rows with no header above them instead of silently dropping them', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'apps-orphan-'));
+    try {
+      const path = join(dir, 'applied-log.md');
+      await writeFile(path, '# Log\n| 2026-11-13 | Designer | Orphan Co | Site | Applied | |\n');
+      const imported = await importRio({ home: dir, paths: { applications: path }, now });
+      const report = imported.sources.find(s => s.kind === 'applications')!;
+      expect(report.skipped).toBe(1);
+      expect(report.message).toContain('no header row above it');
+      expect(report.message).toContain('Orphan Co');
+    } finally { await rm(dir, { recursive: true, force: true }); }
+  });
+
+  it('does not reinterpret timed LinkedIn bullets as rows of an earlier table', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'li-table-'));
+    try {
+      const path = join(dir, 'log.md');
+      await writeFile(path, '| Week | Total |\n|---|---|\n| 46 | 3 |\n\n## 2026-11-14\n- 08:04 PKT | Ana Lee (CEO, Acme) | Post: "x" | thoughtful | liked + commented | n/a\n');
+      const imported = await importRio({ home: dir, paths: { linkedin: path }, now });
+      expect(imported.records.filter(r => r.actionType === 'linkedin_touch').map(r => r.target)).toEqual(['Ana Lee']);
+    } finally { await rm(dir, { recursive: true, force: true }); }
+  });
+});
