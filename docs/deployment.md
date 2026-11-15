@@ -2,6 +2,10 @@
 
 Control Unit can run locally with SQLite or as a hosted dashboard and API on Vercel or Netlify. Hosted mode uses serverless Node functions and PostgreSQL for durable records. A read-only collector runs on the computer that has Rio's source files and sends a validated snapshot to the hosted site. Deploying the site alone does not connect it to Rio's computer.
 
+## Current automatic deployment
+
+The live Vercel project `qaribiqbals-projects/control-unit` is connected to [the GitHub repository](https://github.com/QaribIqbal/Control-Unit). Pushes to `main` trigger production deployments automatically; other branches may produce Vercel previews. [GitHub Actions CI](../.github/workflows/ci.yml) runs tests and a build on pushes and pull requests. The Vercel deployment starts from the Git push independently of the CI result, so review the check result before merging changes. Server credentials stay in Vercel's environment settings and collector credentials stay in the collector machine's gitignored `.env`.
+
 ## 1. Create the database
 
 Create a TLS-enabled PostgreSQL database with a user permitted to create tables and indexes in the target schema. Neon, Supabase, or another standard PostgreSQL provider is suitable. Use the provider's connection URL with certificate/hostname verification available; do not use a connection configured with `sslmode=disable`.
