@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { ArrowUpRight, ChevronDown } from "lucide-react";
 import type { PageProps } from "../ui";
-import { Bars, Chip, Empty, Funnel, Kpi, Panel, PageHeader, Status, formatDate, meta, stageFor } from "../ui";
+import { Bars, Empty, Funnel, GroupHeader, Kpi, Panel, PageHeader, StagePill, meta, stageFor } from "../ui";
+import { dayLabel, groupByDay } from "../detail";
 import { daysToBars } from "../modules";
 
 export function Applications({ data, open, timezone }: PageProps) {
@@ -11,7 +12,7 @@ export function Applications({ data, open, timezone }: PageProps) {
   const todayCount = data.applicationsDaily.at(-1)?.count ?? 0;
   const rows = data.entities.applications;
   const undated = rows.filter((r) => !r.timestamp);
-  const [visible, setVisible] = useState(15);
+  const [visible, setVisible] = useState(7);
   const noData = total?.value === null && rows.length === 0;
   return (
     <>
@@ -33,27 +34,28 @@ export function Applications({ data, open, timezone }: PageProps) {
           </Panel>
         </div>
       )}
-      <Panel title="Latest applications" aside={rows.length ? <Chip>{rows.length}</Chip> : undefined}>
-        {rows.length ? (
-          <div className="table-scroll">
-            <table>
-              <thead><tr><th>Company / role</th><th>Stage</th><th>Status</th><th>Date</th><th>Evidence</th></tr></thead>
-              <tbody>
-                {rows.slice(0, visible).map((r) => (
-                  <tr key={r.id}>
-                    <td><button className="text-button cell-title" onClick={() => open([r.id], "Application evidence")}>{meta(r, "company", r.target)}</button><small>{meta(r, "role", "")}</small></td>
-                    <td><span className="chip chip-neutral">{stageFor(r)}</span></td>
-                    <td><Status value={r.status} /></td>
-                    <td className="nowrap quiet">{formatDate(r.timestamp, timezone, true)}</td>
-                    <td><button className="icon-button" aria-label={`Inspect ${r.target}`} onClick={() => open([r.id], "Application evidence")}><ArrowUpRight size={16} /></button></td>
-                  </tr>
+      {rows.length ? (
+        <div className="feed">
+          {groupByDay(rows, timezone).slice(0, visible).map((g) => (
+            <section key={g.day ?? "undated"} className="feed-day">
+              <GroupHeader title={dayLabel(g.day, data.today.date)} count={g.rows.length} tone={g.day ? undefined : "muted"} />
+              <ul className="feed-list">
+                {g.rows.slice(0, g.day ? undefined : 30).map((r) => (
+                  <li key={r.id}>
+                    <button className="feed-item app-row" onClick={() => open([r.id], "Application")}>
+                      <span className="feed-body"><span className="feed-title"><strong>{meta(r, "company", r.target.split(/\s+[—–]\s+/)[0])}</strong><span className="feed-company">{meta(r, "role", r.target.split(/\s+[—–]\s+/).slice(1).join(" — "))}</span></span></span>
+                      <StagePill stage={stageFor(r)} />
+                      {r.timestamp ? <span className="date-chip">{r.timestamp.slice(5, 10).replace("-", "/")}</span> : null}
+                    </button>
+                  </li>
                 ))}
-              </tbody>
-            </table>
-            {rows.length > visible && <button className="load-more" onClick={() => setVisible((v) => v + 25)}>Show more <ChevronDown size={15} /></button>}
-          </div>
-        ) : <Empty />}
-      </Panel>
+                {!g.day && g.rows.length > 30 && <li><button className="load-more" onClick={() => open(g.rows.map((r) => r.id), "Applications without a date")}>All {g.rows.length} undated applications <ArrowUpRight size={14} /></button></li>}
+              </ul>
+            </section>
+          ))}
+          {groupByDay(rows, timezone).length > visible && <button className="load-more" onClick={() => setVisible((v) => v + 7)}>Show earlier days <ChevronDown size={15} /></button>}
+        </div>
+      ) : <Panel title="Applications"><Empty /></Panel>}
     </>
   );
 }

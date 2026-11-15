@@ -185,7 +185,7 @@ function tableRecord(fields: Fields, kind: SourceKind, source: SourceRef, contex
   const timestamp = rawDate ? parseDate(rawDate) : contextDate;
   if (rawDate && !timestamp) diagnostics.warnings.push(`${source.sheet ? `${source.sheet} row ${source.row}` : `line ${source.line}`}: unknown or invalid date ${JSON.stringify(rawDate)}`);
   const metadata: ExecutionRecord['metadata'] = {};
-  for (const [key, value] of Object.entries({ company, role, person, stage, platform: clean(get(fields, 'platform')), waitingOn: clean(get(fields, 'waitingOn', 'owner')), waitingFor: clean(get(fields, 'waitingFor', 'next step')), reply: clean(get(fields, 'reply')), blockedSince: parseDate(get(fields, 'blockedSince')), appliedAt: parseDate(get(fields, 'appliedAt')), updatedAt: parseDate(get(fields, 'updated')) })) if (value) metadata[key] = typeof value === 'string' ? value.slice(0, 4000) : value;
+  for (const [key, value] of Object.entries({ company, role, person, stage, platform: clean(get(fields, 'platform')), city: clean(get(fields, 'city', 'location', 'area', 'town')), waitingOn: clean(get(fields, 'waitingOn', 'owner')), waitingFor: clean(get(fields, 'waitingFor', 'next step')), reply: clean(get(fields, 'reply')), blockedSince: parseDate(get(fields, 'blockedSince')), appliedAt: parseDate(get(fields, 'appliedAt')), updatedAt: parseDate(get(fields, 'updated')) })) if (value) metadata[key] = typeof value === 'string' ? value.slice(0, 4000) : value;
   if (actionType === 'linkedin_touch' && (get(fields, 'touchType') || touchType(action))) metadata.touchType = get(fields, 'touchType') || touchType(action);
   if (get(fields, 'eventId')) metadata.eventId = get(fields, 'eventId');
   const explicit = get(fields, 'status');
@@ -239,6 +239,7 @@ function timedLinkedInRecord(text: string, source: SourceRef, date: string | nul
   metadata.touchType = type;
   const typeCell = values[values.length - (hasLinkCell ? 3 : 2)];
   if (typeCell) metadata.type = clean(typeCell).slice(0, 4000);
+  if (values[2] && values.length >= 6) metadata.subject = clean(values[2]).slice(0, 300);
   return record({ agent: 'Rio', timestamp: date, actionType: 'linkedin_touch', target: person, detail: source.excerpt || text,
     status: completedTouch ? 'success' : (['failed', 'blocked', 'pending', 'planned'] as Status[]).includes(statusOf(activity)) ? statusOf(activity) : 'success', outputLink: linkOf(values.at(-1) || '') || linkOf(text), source,
     recordKind: 'execution', metadata });

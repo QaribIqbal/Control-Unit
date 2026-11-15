@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { ArrowUpRight, Bot, ChevronDown, FileText, ShieldCheck, X } from "lucide-react";
+import { ArrowUpRight, Bot, ChevronDown, FileText, ShieldCheck, X, MessageCircle, ThumbsUp, Send, UserPlus, Reply, Megaphone, Activity, Clock3 } from "lucide-react";
 import type { AnalysisResponse, DashboardData, ExecutionRecord, SourceReport } from "../shared/types";
-import { normalizeStage, applyActionFloor, type Stage } from "../shared/stages";
+import { STAGES, normalizeStage, applyActionFloor, type Stage } from "../shared/stages";
+import { DENTAL_STAGES, daysSince, dentalStage, moduleOf, whoseMove } from "./detail";
 
 export function formatDate(value: string | null, timezone?: string, short = false) {
   if (!value) return "Date not recorded";
@@ -165,40 +166,84 @@ export function Modal({
     </div>
   );
 }
+/* ---------- detail building blocks ---------- */
+/** Stage pill: module colour by default; semantic colour for closed/done/blocked states. */
+export function StagePill({ stage, tone }: { stage: string; tone?: "ok" | "warn" | "alert" | "muted" }) {
+  const auto = tone ?? (/^(closed|rejected)$/i.test(stage) ? "muted" : /^(offer|sale|published)$/i.test(stage) ? "ok" : /^blocked$/i.test(stage) ? "alert" : undefined);
+  return <span className={`pill ${auto ? `pill-${auto}` : "pill-accent"}`}>{stage}</span>;
+}
+/** Whose move: Qarib red, Rio blue, third parties grey. */
+export function PersonChip({ who }: { who: unknown }) {
+  const mover = whoseMove(who);
+  if (mover === "none") return <span className="person person-none">No owner recorded</span>;
+  const label = String(who).trim();
+  return <span className={`person person-${mover}`} title={`Waiting on ${label}`}><span className="person-dot" />{mover === "qarib" ? "Qarib’s move" : mover === "rio" ? "Rio’s move" : label}</span>;
+}
+/** Bold days chip; red when stale. */
+export function DaysChip({ days, stale, suffix = "d" }: { days: number | null; stale?: boolean; suffix?: string }) {
+  if (days === null) return <span className="days days-none">no date</span>;
+  return <span className={`days ${stale ? "days-stale" : ""}`}><Clock3 size={12} /><strong>{days}</strong>{suffix}</span>;
+}
+/** Coloured group header with count. */
+export function GroupHeader({ title, count, tone }: { title: ReactNode; count: number; tone?: "alert" | "ok" | "muted" }) {
+  return <div className={`group-head ${tone ? `group-${tone}` : ""}`}><span className="group-bar" /><h3>{title}</h3><span className="group-count">{count}</span></div>;
+}
+/** Progress track: every step shown, current lit in the module colour. */
+export function StageTrack({ steps, current }: { steps: readonly string[]; current: string }) {
+  const index = steps.indexOf(current);
+  return (
+    <ol className="stage-track" aria-label={`Stage: ${current}`}>
+      {steps.map((step, i) => <li key={step} className={i < index ? "done" : i === index ? `current ${step === "Closed" ? "closed" : ""}` : ""}><span className="track-dot" /><span className="track-label">{step}</span></li>)}
+    </ol>
+  );
+}
+const TYPE_ICONS: Record<string, typeof Activity> = { comment: MessageCircle, like: ThumbsUp, message: Send, inmail: Send, connection: UserPlus, reply: Reply, post: Megaphone };
+export function TouchIcon({ type }: { type: string }) {
+  const Icon = TYPE_ICONS[type] || Activity;
+  return <span className={`touch-icon touch-${TYPE_ICONS[type] ? type : "other"}`} aria-hidden="true"><Icon size={15} /></span>;
+}
+
 const SPEC_FIELDS: [string, string][] = [
-  ["company", "Company"], ["role", "Role"], ["person", "Person"], ["platform", "Platform"], ["touchType", "Type"],
-  ["waitingFor", "Waiting for"], ["waitingOn", "Waiting on"], ["blockedSince", "Blocked since"], ["reply", "Reply"],
+  ["person", "Person"], ["city", "City"], ["platform", "Platform / channel"], ["touchType", "Type"], ["subject", "About"],
+  ["waitingFor", "Next step"], ["blockedSince", "Blocked since"], ["reply", "Reply"],
 ];
 export function stageFor(record: ExecutionRecord): Stage {
   const fallback: Stage = record.actionType === "interview" ? "Interview" : record.actionType === "assessment" ? "Assessment" : "Applied";
   const stage = normalizeStage(record.metadata.stage, fallback);
   return applyActionFloor(stage, record.actionType);
 }
-export function RecordDetail({ record, timezone }: { record: ExecutionRecord; timezone: string }) {
+export function RecordDetail({ record, timezone, today, stale = [] }: { record: ExecutionRecord; timezone: string; today?: string; stale?: DashboardData["stale"] }) {
   const link = safeLink(record.outputLink);
-  const rawStage = String(record.metadata.stage || "").trim();
+  const module = moduleOf(record);
   const isStageful = ["job_application", "interview", "assessment"].includes(record.actionType);
-  const rows: [string, ReactNode][] = [];
-  rows.push(["Recorded", formatDate(record.timestamp, timezone)]);
-  if (isStageful) rows.push(["Stage", <><span className="chip chip-neutral">{stageFor(record)}</span>{rawStage && rawStage.toLowerCase() !== stageFor(record).toLowerCase() && <span className="spec-raw">{rawStage}</span>}</>]);
-  else if (rawStage) rows.push(["Stage", rawStage]);
-  for (const [key, label] of SPEC_FIELDS) { const v = record.metadata[key]; if (v !== null && v !== undefined && v !== "") rows.push([label, String(v)]); }
-  rows.push(["Action", record.actionType.replaceAll("_", " ")]);
-  rows.push(["Agent", record.agent]);
-  // Importer rows repeat the raw source row as `detail`; show it only inside the collapsed evidence box.
+  const isDental = record.actionType === "dental_lead";
+  const company = String(record.metadata.company || "") || (record.target.split(/\s+[—–]\s+/)[0] ?? record.target);
+  const role = String(record.metadata.role || "") || (record.target.includes(" — ") ? record.target.split(/\s+[—–]\s+/).slice(1).join(" — ") : "");
+  const title = record.actionType === "linkedin_touch" ? String(record.metadata.person || record.target) : record.actionType === "social_post" ? record.target : company || record.target;
+  const subtitle = record.actionType === "linkedin_touch" ? String(record.metadata.company || "") : record.actionType === "social_post" ? String(record.metadata.platform || "") : role;
+  const staleItem = stale.find((s) => s.recordId === record.id);
+  const days = today ? daysSince(record, today, timezone) : null;
+  const waitingOn = record.metadata.waitingOn;
+  const rawStage = String(record.metadata.stage || "").trim();
+  const fields: [string, string][] = SPEC_FIELDS.flatMap(([key, label]) => { const v = record.metadata[key]; return v === null || v === undefined || v === "" ? [] : [[label, String(v)] as [string, string]]; });
+  if (rawStage && (isStageful || isDental)) fields.unshift(["Recorded as", rawStage]);
+  fields.push(["Recorded", formatDate(record.timestamp, timezone)], ["Agent", record.agent]);
   const detailIsSourceCopy = Boolean(record.source.excerpt) && record.detail === record.source.excerpt;
   const showBody = Boolean(record.detail) && !detailIsSourceCopy;
-  const extras = Object.entries(record.metadata).filter(([key, v]) => !SPEC_FIELDS.some(([k]) => k === key) && !["stage", "company", "role", "person", "appliedAt", "updatedAt", "externalId"].includes(key) && v !== null && v !== "");
   return (
-    <article className="record-detail">
-      <div className="record-detail-heading">
-        <span className="agent-tag"><Bot size={14} />{record.agent}</span>
-        <Status value={record.status} />
-      </div>
-      <h3>{record.target || record.actionType.replaceAll("_", " ")}</h3>
+    <article className="record-detail" data-module={module}>
+      <header className="record-hero">
+        <div className="hero-top"><Status value={record.status} /><span className="hero-kind">{record.actionType.replaceAll("_", " ")}</span></div>
+        <h3 className="hero-title">{title || record.actionType.replaceAll("_", " ")}</h3>
+        {subtitle && <p className="hero-subtitle">{subtitle}</p>}
+        {(isStageful || isDental) && <StageTrack steps={isDental ? DENTAL_STAGES : STAGES} current={isDental ? dentalStage(record) : stageFor(record)} />}
+        <div className="hero-chips">
+          {(isStageful || isDental || waitingOn) && <PersonChip who={waitingOn} />}
+          {(isStageful || isDental) && <DaysChip days={staleItem?.daysWaiting ?? days} stale={Boolean(staleItem)} suffix={isDental ? "d since contact" : "d waiting"} />}
+        </div>
+      </header>
       <dl className="spec-sheet">
-        {rows.map(([label, value]) => (<div className="spec-row" key={label}><dt>{label}</dt><dd>{value}</dd></div>))}
-        {extras.map(([key, v]) => (<div className="spec-row" key={key}><dt>{key.replace(/([A-Z])/g, " $1")}</dt><dd>{String(v)}</dd></div>))}
+        {fields.map(([label, value]) => (<div className="spec-row" key={label}><dt>{label}</dt><dd>{value}</dd></div>))}
       </dl>
       {showBody && <p className="detail-text">{record.detail}</p>}
       {link ? (

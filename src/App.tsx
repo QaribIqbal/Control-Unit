@@ -441,7 +441,7 @@ export default function App() {
             {drawer.ids.map((id) => {
               const record = recordById.get(id) || extraRecords[id];
               return record ? (
-                <RecordDetail key={id} record={record} timezone={timezone} />
+                <RecordDetail key={id} record={record} timezone={timezone} today={data?.today.date} stale={data?.stale} />
               ) : !drawerLoading ? (
                 <p className="inline-error" key={id}>
                   Record unavailable: {id}

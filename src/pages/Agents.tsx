@@ -1,7 +1,8 @@
 import { useState } from "react";
-import { Activity, ArrowUpRight, Bot, ChevronDown, ChevronRight, Database, LoaderCircle, MessageSquare, Plus, RefreshCw, Search, Send, Sparkles } from "lucide-react";
+import { Activity, ArrowUpRight, Bot, ShieldCheck, ChevronDown, ChevronRight, Database, LoaderCircle, MessageSquare, Plus, RefreshCw, Search, Send, Sparkles } from "lucide-react";
 import type { AnalysisResponse } from "../../shared/types";
 import type { PageProps } from "../ui";
+import { groupFlags } from "../detail";
 import { AnalysisResult, Chip, Empty, Kpi, PageHeader, Panel, Sources, Status, formatDate } from "../ui";
 
 export interface AgentsProps extends PageProps {
@@ -28,6 +29,7 @@ export function Agents({ data, open, timezone, hosted, api, onLink, onSetup, ref
   const filtered = data.records
     .filter((r) => (agentFilter === "all" || r.agent === agentFilter) && (!needle || [r.agent, r.target, r.detail, r.actionType, r.status, ...Object.values(r.metadata)].join(" ").toLowerCase().includes(needle)))
     .sort((a, b) => (b.timestamp ? Date.parse(b.timestamp) : -Infinity) - (a.timestamp ? Date.parse(a.timestamp) : -Infinity));
+  const flagGroups = groupFlags(data);
   const failed = data.agents.reduce((n, a) => n + a.failed.length, 0);
   const blocked = data.agents.reduce((n, a) => n + a.blocked.length, 0);
   const bad = data.sources.filter((s) => s.status === "error").length;
@@ -63,6 +65,20 @@ export function Agents({ data, open, timezone, hosted, api, onLink, onSetup, ref
         <Kpi label="Blocked records" value={data.agents.length ? blocked : null} tone={blocked ? "warn" : "ok"} />
         <Kpi label="Unverified success" value={data.agents.length ? data.verification.length : null} tone={data.verification.length ? "warn" : "ok"} onClick={data.verification.length ? () => open(data.verification.map((v) => v.recordId), "Unverified success") : undefined} />
       </div>
+
+      <Panel title="Verification flags" icon={<ShieldCheck size={17} />} aside={<span className="head-note">Success claims without a matching delivered output</span>}>
+        {flagGroups.length ? (
+          <div className="flag-groups">
+            {flagGroups.map((g) => (
+              <div key={g.agent} className="flag-group">
+                <span className="flag-agent"><Bot size={16} />{g.agent}</span>
+                {g.high.length > 0 && <button className="sev sev-high" onClick={() => open(g.high, `${g.agent} · Output claims without evidence`)}><strong>{g.high.length}</strong> output claims</button>}
+                {g.low.length > 0 && <button className="sev sev-low" onClick={() => open(g.low, `${g.agent} · Log assertions without output`)}><strong>{g.low.length}</strong> log assertions</button>}
+              </div>
+            ))}
+          </div>
+        ) : <Empty>No unverified success claims.</Empty>}
+      </Panel>
 
       <Panel title="Source health" icon={<Database size={17} />} aside={<span className="chip-row">{ok > 0 && <Chip tone="ok">{ok} synced</Chip>}{missing > 0 && <Chip tone="warn">{missing} missing</Chip>}{bad > 0 && <Chip tone="alert">{bad} errors</Chip>}</span>}>
         <Sources sources={data.sources} />
