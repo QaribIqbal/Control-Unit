@@ -1,4 +1,4 @@
-import { readFile, readdir } from 'node:fs/promises';
+import { readFile, readdir, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { basename, join, resolve, sep } from 'node:path';
 import { createHash } from 'node:crypto';
@@ -223,7 +223,7 @@ async function parseWorkbook(buffer: Buffer, path: string, diagnostics: Diagnost
 
 function errorMessage(error: unknown) { return error instanceof Error ? error.message : String(error); }
 function isMissing(error: unknown) { return typeof error === 'object' && error !== null && 'code' in error && error.code === 'ENOENT'; }
-/** Expand only path-segment wildcards, without following directory symlinks. */
+/** Expand path-segment wildcards, following matching file and directory symlinks. */
 async function filesFor(pattern: string): Promise<string[]> {
   if (!/[*?]/.test(pattern)) return [pattern];
   const absolute = resolve(pattern), parts = absolute.split(sep).filter(Boolean);
@@ -235,7 +235,16 @@ async function filesFor(pattern: string): Promise<string[]> {
       const regex = new RegExp(`^${part.split(/([*?])/).map(p => p === '*' ? '.*' : p === '?' ? '.' : p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('')}$`);
       let entries;
       try { entries = await readdir(parent, { withFileTypes: true }); } catch (error) { if (isMissing(error)) continue; throw error; }
-      for (const entry of entries) if (!entry.isSymbolicLink() && regex.test(entry.name) && (index === parts.length - 1 ? entry.isFile() : entry.isDirectory())) next.push(join(parent, entry.name));
+      for (const entry of entries) {
+        if (!regex.test(entry.name)) continue;
+        const path = join(parent, entry.name);
+        let target: { isFile(): boolean; isDirectory(): boolean } = entry;
+        if (entry.isSymbolicLink()) {
+          try { target = await stat(path); }
+          catch (error) { if (isMissing(error)) continue; throw error; }
+        }
+        if (index === parts.length - 1 ? target.isFile() : target.isDirectory()) next.push(path);
+      }
     }
     paths = next;
   }

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
@@ -112,6 +112,28 @@ describe('read-only Rio imports', () => {
     expect(result.records.filter(r => r.actionType === 'summary')).toHaveLength(1);
     expect(result.records.find(r => r.metadata.company === 'Cached')?.actionType).toBe('interview');
     expect(result.records.find(r => r.metadata.company === 'Uncached')).toMatchObject({ timestamp: null, status: 'unknown' });
+  });
+
+  it('follows dated memory file symlinks in a glob and ignores broken links', async () => {
+    const original = await file('memory/2026-11-14.md', '# Daily summary\nCompleted research.');
+    await mkdir(join(home, 'rio-view/memory'), { recursive: true });
+    await symlink(original, join(home, 'rio-view/memory/2026-11-14.md'));
+    await symlink(join(home, 'memory/missing.md'), join(home, 'rio-view/memory/2026-11-13.md'));
+    const result = await importRio({ home, paths: { memory: join(home, 'rio-view/memory/????-??-??.md') }, now });
+    const summaries = result.records.filter(r => r.actionType === 'summary');
+    expect(summaries).toHaveLength(1);
+    expect(summaries[0]).toMatchObject({ timestamp: '2026-11-14', source: { path: join(home, 'rio-view/memory/2026-11-14.md') } });
+    expect(result.sources.find(s => s.kind === 'memory')).toMatchObject({ status: 'ok', records: 1 });
+    expect(await readFile(original, 'utf8')).toContain('Completed research.');
+  });
+
+  it('follows a glob-matched directory symlink to daily memory', async () => {
+    await file('memory/2026-11-15.md', '# Daily summary\nSent a report.');
+    await mkdir(join(home, 'views'), { recursive: true });
+    await symlink(join(home, 'memory'), join(home, 'views/current'));
+    const result = await importRio({ home, paths: { memory: join(home, 'views/*/2026-11-15.md') }, now });
+    expect(result.records.filter(r => r.actionType === 'summary')).toHaveLength(1);
+    expect(result.sources.find(s => s.kind === 'memory')).toMatchObject({ status: 'ok', records: 1 });
   });
 
   it('surfaces unreadable source paths and imports explicitly labelled bullet activities', async () => {
