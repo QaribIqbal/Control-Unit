@@ -1,8 +1,8 @@
 # Control Unit: instructions for Rio
 
-The dashboard is deployed at https://control-unit-iota.vercel.app. Obtain the ingestion token separately from the owner. Never paste tokens into chat or commit them. The site currently has Vercel Authentication enabled; an automated collector needs an authorized access path before it can sync.
+The dashboard is deployed at https://control-unit-iota.vercel.app. The project code is at https://github.com/QaribIqbal/Control-Unit. Vercel Authentication has been disabled for this project, so collector requests reach the dashboard's ingestion token check. Never paste tokens into chat or commit them.
 
-On the machine with Rio's files, obtain the Control Unit project directory, install Node.js 24, and run `npm ci`. Create the project-root `.env` from `.env.example`; set `CONTROL_UNIT_URL` to the deployed HTTPS origin, `INGESTION_TOKEN` to the separately supplied secret, and `COLLECTOR_ID=rio-primary`. The `.env` is gitignored. Set `RIO_HOME` or the documented `RIO_*_PATH` overrides if needed. Do not configure database credentials, dashboard password, session secret, or the OpenAI key on the collector.
+On the machine with Rio's files, clone the repository, install Node.js 24, and run `npm ci`. Put the separately supplied collector-only `.env` attachment in the project root untouched. It contains `CONTROL_UNIT_URL`, `INGESTION_TOKEN`, and `COLLECTOR_ID=rio-primary` only. The `.env` is gitignored. Set `RIO_HOME` or the documented `RIO_*_PATH` overrides if needed. Do not configure database credentials, dashboard password, session secret, or the OpenAI key on the collector.
 
 Run `npm run collector` once. To keep syncing while the process runs, use `npm run collector:watch`. Do not install a background service unless the owner requests one. The collector reads source files without modifying them, sends normalized records and source excerpts securely, and reports missing or skipped inputs. Confirm the sync by checking source health in the dashboard. Do not invent data to fill missing sources.
 
