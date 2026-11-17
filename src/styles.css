@@ -2221,6 +2221,8 @@ button.tile:hover { border-color: #46546a; background: #1c222b; }
 .module-card-label { font-size: 14px; font-weight: 600; }
 .module-card-value { font-size: 52px; font-weight: 600; letter-spacing: -2px; line-height: 1; display: flex; align-items: baseline; gap: 10px; font-variant-numeric: tabular-nums; }
 .module-card-value small { font-size: 13px; font-weight: 450; letter-spacing: 0; color: var(--quiet); }
+.module-card-secondary { display: flex; align-items: baseline; gap: 8px; color: var(--quiet); font-size: 12.5px; }
+.module-card-secondary strong { color: #edf2f7; font-size: 16px; font-variant-numeric: tabular-nums; }
 .module-card-detail { margin-top: auto; display: flex; justify-content: space-between; align-items: center; color: var(--quiet); font-size: 12.5px; }
 
 /* bars */
@@ -2531,3 +2533,15 @@ details.evidence-block[open] summary { margin-bottom: 10px; }
 }
 @media (prefers-reduced-motion: reduce) { .entity-card, .slot, .feed-item { transition: none; } }
 .metric-none { color: var(--quiet); padding: 18px; font-size: 13px; }
+
+/* Application list filter */
+.app-status { min-width: 0; max-width: min(45%, 230px); }
+.app-status .pill { display: block; overflow: hidden; text-overflow: ellipsis; }
+.applications-list-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 24px 0 14px; }
+.applications-list-head h2 { margin: 0; font-size: 15px; }
+.submissions-filter { min-height: 38px; padding: 7px 13px; border: 1px solid var(--border); border-radius: 8px; background: transparent; color: var(--quiet); font: inherit; font-size: 13px; cursor: pointer; }
+.submissions-filter[aria-pressed="true"] { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--accent); }
+.submissions-filter:hover:not(:disabled) { border-color: var(--accent); }
+.submissions-filter:disabled { cursor: not-allowed; opacity: .5; }
+.applications-filter-note { margin: -6px 0 14px; font-size: 12px; }
+@media (pointer: coarse) { .submissions-filter { min-height: 44px; } }

@@ -91,8 +91,8 @@ export function moduleSummaries(data: DashboardData): ModuleSummary[] {
   const socialBars = perDay(e.social, today, data.timezone, 6, 7);
   const activityBars = perDay(data.records, today, data.timezone, 13);
   return [
-    { id: "applications", label: "Applications", value: apps, caption: "applications", bars: daysToBars(data.applicationsDaily),
-      detail: apps === null ? "No data recorded" : `${week ?? 0} this week · ${sum(data.applicationsDaily)} in last 14 days`, alerts: 0, tone: tone(apps, 0) },
+    { id: "applications", label: "Applications", value: apps, caption: "roles tracked", bars: daysToBars(data.applicationsDaily),
+      detail: apps === null ? "No data recorded" : `${week ?? 0} tracked this week · ${sum(data.applicationsDaily)} in last 14 days`, alerts: 0, tone: tone(apps, 0) },
     { id: "interviews", label: "Interviews & Assessments", value: noPipeline ? null : (interviews ?? 0) + (assessments ?? 0), caption: "open", bars: data.pipelineStages.filter((s) => s.stage !== "Applied").map((s) => ({ label: s.stage, count: s.count, recordIds: s.recordIds })),
       detail: noPipeline ? "No data recorded" : `${interviews ?? 0} interviews · ${assessments ?? 0} assessments`, alerts: pipelineStale, tone: tone(noPipeline ? null : 1, pipelineStale) },
     { id: "linkedin", label: "LinkedIn Outreach", value: li, caption: "touches", bars: daysToBars(data.linkedinDaily),

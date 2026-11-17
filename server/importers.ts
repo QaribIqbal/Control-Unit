@@ -209,6 +209,9 @@ function tableRecord(fields: Fields, kind: SourceKind, source: SourceRef, contex
   if (actionType === 'linkedin_touch' && (get(fields, 'touchType') || touchType(action))) metadata.touchType = get(fields, 'touchType') || touchType(action);
   if (get(fields, 'eventId')) metadata.eventId = get(fields, 'eventId');
   const explicit = get(fields, 'status');
+  // Preserve the status cell itself: the normalized execution status conflates
+  // submissions with unrelated sent messages and awaiting-response states.
+  if (kind === 'applications' && actionType === 'job_application') metadata.appStatus = clean(explicit);
   const deadlineState = statusOf(get(fields, 'deadline status'));
   let status: Status;
   if (explicit) status = statusOf(explicit);
@@ -238,6 +241,7 @@ function bulletRecord(text: string, kind: SourceKind, source: SourceRef, date: s
   const timestamp = fields.date ? parseDate(fields.date) : parseDate(plain) || date;
   const metadata: ExecutionRecord['metadata'] = {};
   for (const key of ['company', 'person', 'role', 'stage', 'platform', 'waitingOn', 'waitingFor']) if (fields[key]) metadata[key] = fields[key];
+  if (kind === 'applications' && actionType === 'job_application') metadata.appStatus = clean(fields.status || '');
   if (actionType === 'linkedin_touch' && touchType(plain)) metadata.touchType = touchType(plain);
   return record({ agent: 'Rio', actionType, target, timestamp, status: statusOf(fields.status || plain), detail: source.excerpt || text, outputLink: linkOf(text), source, metadata, recordKind: ['dental', 'social', 'opportunities'].includes(kind) ? 'snapshot' : 'execution' });
 }

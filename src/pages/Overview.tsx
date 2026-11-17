@@ -5,6 +5,7 @@ import { moduleSummaries, routeHref } from "../modules";
 
 export function Overview({ data, open }: PageProps) {
   const summaries = moduleSummaries(data);
+  const clean = data.kpis.find((k) => k.id === "applications-clean");
   const byId = new Map(data.records.map((r) => [r.id, r]));
   const attention = data.attention;
   const todayItems = data.today.items.filter((i) => i.count > 0);
@@ -41,6 +42,7 @@ export function Overview({ data, open }: PageProps) {
             ) : (
               <strong className="module-card-value"><CountUp value={s.value} /><small>{s.caption}</small></strong>
             )}
+            {s.id === "applications" && <span className="module-card-secondary"><span>Clean submissions</span><strong>{clean?.value == null ? "No data recorded" : <CountUp value={clean.value} />}</strong></span>}
             <Bars bars={s.bars} title={s.label} compact />
             <span className="module-card-detail">{s.detail}<ArrowUpRight size={14} /></span>
           </a>

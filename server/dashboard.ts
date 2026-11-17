@@ -61,6 +61,14 @@ const wasApplied = (r: ExecutionRecord) => {
   if (r.status === 'pending') return !/\b(?:not|never|no)\s+(?:yet\s+)?(?:submitted|applied|sent)\b|\b(?:unsent|unsubmitted|to apply|todo|to do|draft|queued)\b/i.test(`${r.detail} ${r.source.excerpt || ''} ${r.metadata.stage || ''}`);
   return true;
 };
+/** Only an explicit application Status cell can establish a clean submission. */
+const isCleanSubmission = (r: ExecutionRecord) => {
+  const status = String(r.metadata.appStatus || '').trim();
+  if (/\b(?:not|never|no)\s+(?:yet\s+)?(?:submitted|applied|sent)\b|\b(?:unsubmitted|unsent|not yet submitted|pending submission|to be submitted)\b/i.test(status)) return false;
+  return /^(?:(?:✅|✔️?|☑️?|🟢)\s*)*(?:submitted|applied|application\s+(?:submitted|sent))\b/i.test(status);
+};
+/** Match importer glob semantics: wildcards do not cross path separators. */
+const sourcePathMatcher = (pattern: string) => new RegExp(`^${pattern.split(/([*?])/).map(part => part === '*' ? '[^/]*' : part === '?' ? '[^/]' : part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('')}$`);
 const stageOf = (r: ExecutionRecord): Stage => {
   const fallback: Stage = r.actionType === 'interview' ? 'Interview' : r.actionType === 'assessment' ? 'Assessment' : 'Applied';
   const stage = applyActionFloor(normalizeStage(r.metadata.stage, fallback), r.actionType);
@@ -81,6 +89,12 @@ export function buildDashboard(records: ExecutionRecord[], sources: SourceReport
   // One concept: an application is a distinct company + role with any application record. Dated events feed the day series.
   const opportunityFacts = facts.filter(r => ['job_application', 'interview', 'assessment'].includes(r.actionType));
   const applicationEntities = latestEntities(opportunityFacts.filter(r => r.actionType === 'job_application'));
+  const applicationSources = sources.filter(s => s.kind === 'applications' && s.status === 'ok').map(s => sourcePathMatcher(s.path));
+  const sourceApplications = facts.filter(r => r.actionType === 'job_application' && r.recordKind === 'execution' && applicationSources.some(m => m.test(r.source.path)));
+  // Old snapshots lack the original status cell; an incomplete count would be
+  // misleading until the collector has imported the source again.
+  const cleanAvailable = sourceApplications.some(r => typeof r.metadata.appStatus === 'string' && r.metadata.appStatus.trim()) && sourceApplications.every(r => typeof r.metadata.appStatus === 'string');
+  const cleanSubmissions = cleanAvailable ? sourceApplications.filter(isCleanSubmission) : [];
   const appliedEvents = (() => { const seen = new Set<string>(); return events.filter(r => r.actionType === 'job_application' && wasApplied(r) && dayOf(r)).filter(r => { const key = `${norm(r.entityKey)}|${dayOf(r)}`; if (seen.has(key)) return false; seen.add(key); return true; }); })();
   const linkedin = events.filter(r => r.actionType === 'linkedin_touch' && !NOT_DONE.has(r.status) && r.status !== 'failed');
   const opportunityStates = new Map<string, ExecutionRecord>();
@@ -94,7 +108,8 @@ export function buildDashboard(records: ExecutionRecord[], sources: SourceReport
   const thisWeek = (r: ExecutionRecord) => { const d = dayOf(r); return d ? d >= weekStart && d <= today : false; };
   const kpis: Kpi[] = [];
   const add = (id: string, label: string, rows: ExecutionRecord[], available: boolean, description: string) => kpis.push({ id, label, value: available ? rows.length : null, recordIds: rows.map(r => r.id), description });
-  add('applications-total', 'Applications', applicationEntities, applicationEntities.length > 0, 'Distinct company + role with a recorded application, latest state each.');
+  add('applications-total', 'Roles tracked', applicationEntities, applicationEntities.length > 0, 'Distinct company + role with a recorded application, latest state each.');
+  add('applications-clean', 'Clean submissions', cleanSubmissions, cleanAvailable, 'Applied-log rows with an explicit submitted status. Run the current collector to capture status evidence.');
   add('applications-week', 'Applications this week', appliedEvents.filter(thisWeek), applicationEntities.length > 0, `Dated applications, Monday ${weekStart} through ${today}, ${timezone}. Undated records excluded.`);
   add('interviews', 'Interviews in motion', interviews.filter(r => !terminal(r) && r.status !== 'failed'), interviews.length > 0, 'Latest recorded stage per interview; closed/rejected/withdrawn excluded.');
   add('assessments', 'Assessments pending', assessments.filter(r => r.actionType === 'assessment' && !terminal(r) && !completed(r) && r.status !== 'failed'), assessments.length > 0, 'Latest open assessment states; completed, closed or progressed assessments excluded.');
@@ -135,7 +150,7 @@ export function buildDashboard(records: ExecutionRecord[], sources: SourceReport
   ];
   const todayRows = (match: (r: ExecutionRecord) => boolean) => facts.filter(r => onDay(r) && match(r));
   const todayItems = [
-    { key: 'applications', label: 'Applications sent', rows: appliedEvents.filter(onDay) },
+    { key: 'applications', label: 'Application activity', rows: appliedEvents.filter(onDay) },
     { key: 'linkedin', label: 'LinkedIn touches', rows: linkedin.filter(onDay) },
     { key: 'posts', label: 'Posts published', rows: todayRows(r => r.actionType === 'social_post' && r.status === 'published') },
     { key: 'blocked', label: 'Slots blocked', rows: todayRows(r => r.actionType === 'social_post' && r.status === 'blocked') },
