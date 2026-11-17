@@ -23,6 +23,8 @@ describe('applications UI', () => {
     const html = renderToStaticMarkup(<Applications data={data} open={() => {}} timezone="UTC" hosted={false} />);
     expect(html).toContain('Roles tracked');
     expect(html).toContain('Clean submissions');
+    expect(html).toContain('Reconciled total');
+    expect(html).toContain('Stated in log');
     expect(html).toContain('Submissions only');
     expect(html).toContain('aria-pressed="false"');
     expect(html).toContain('SKIPPED');

@@ -23,6 +23,7 @@ export function applicationRows(data: DashboardData, submissionsOnly: boolean) {
 
 export function Applications({ data, open, timezone }: PageProps) {
   const total = data.kpis.find((k) => k.id === "applications-total");
+  const sent = data.kpis.find((k) => k.id === "applications-sent");
   const week = data.kpis.find((k) => k.id === "applications-week");
   const clean = data.kpis.find((k) => k.id === "applications-clean");
   const last14 = data.applicationsDaily.reduce((n, d) => n + d.count, 0);
@@ -38,6 +39,7 @@ export function Applications({ data, open, timezone }: PageProps) {
       <PageHeader title="Applications" subtitle="Tracked roles, confirmed submissions, and where each one stands." />
       <div className="tile-row">
         <Kpi label="Roles tracked" value={total?.value ?? null} hint="Distinct company + role" onClick={total ? () => open(total.recordIds, "Roles tracked") : undefined} />
+        <Kpi label="Reconciled total" value={sent?.value ?? null} hint="Stated in log" onClick={sent && sent.value !== null ? () => open(sent.recordIds, "Reconciled total") : undefined} />
         <Kpi label="Clean submissions" value={clean?.value ?? null} hint="Confirmed in applied log" onClick={clean && clean.value !== null ? () => open(clean.recordIds, clean.label) : undefined} />
         <Kpi label="Tracked activity this week" value={week?.value ?? null} hint="Dated, Monday to today" onClick={week ? () => open(week.recordIds, "Tracked activity this week") : undefined} />
         <Kpi label="Tracked activity today" value={noData ? null : todayCount} />
