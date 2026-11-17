@@ -342,6 +342,15 @@ function parseMarkdown(text: string, path: string, kind: SourceKind, diagnostics
       if (parsed) records.push(parsed); else warn(diagnostics, `line ${i + 1}`, `unrecognized activity; retained in source only: ${snippet(line)}`);
     }
   }
+  if (kind === 'applications') {
+    // The apply engine states a reconciled submissions total in the log ("Clean total stays 272").
+    // Carry the latest statement as a summary record so the dashboard can show applications
+    // actually sent separately from every role the log merely records.
+    const matches: { count: number; line: number; date: string | null }[] = [];
+    lines.forEach((line, i) => { const m = line.match(/clean total\s*:?\s*\(?\s*(?:stays|is|now)?\s*(\d+)/i); if (m) matches.push({ count: Number(m[1]), line: i + 1, date: parseDate(line) }); });
+    const last = matches.at(-1);
+    if (last) records.push(record({ agent: 'Rio', timestamp: last.date, actionType: 'summary', target: `applications_sent ${last.date || 'undated'}`, detail: `Applications sent (reconciled total stated in the applied log): ${last.count}`, status: 'unknown', outputLink: null, source: { path, line: last.line, excerpt: lines[last.line - 1] }, recordKind: 'summary', metadata: { metric: 'applications_sent', count: last.count } }));
+  }
   return records;
 }
 

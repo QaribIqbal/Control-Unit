@@ -39,6 +39,24 @@ describe('applications are one concept with a real date series', () => {
   });
 });
 
+describe('applications sent is the reconciled total, not the log size', () => {
+  it('carries the engine clean-total statement into its own KPI and labels the log count as roles tracked', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'apps-sent-'));
+    try {
+      const path = join(dir, 'applied-log.md');
+      await writeFile(path, `# Applied log\n| Date | Company | Role | Platform | Status |\n|---|---|---|---|---|\n| 2026-11-14 | Acme | Engineer | Site | Submitted |\n| 2026-11-15 | Beta | Designer | Site | Skipped |\n\nClean total now 271.\n`);
+      const imported = await importRio({ home: dir, paths: { applications: path }, now });
+      const data = buildDashboard(imported.records, imported.sources, { now });
+      const sent = data.kpis.find(k => k.id === 'applications-sent');
+      expect(sent?.label).toBe('Applications sent');
+      expect(sent?.value).toBe(271);
+      const tracked = data.kpis.find(k => k.id === 'applications-total');
+      expect(tracked?.label).toBe('Roles tracked');
+      expect(tracked?.value).toBe(2);
+    } finally { await rm(dir, { recursive: true, force: true }); }
+  });
+});
+
 describe('attention counts only actionable items', () => {
   it('ignores verification flags, old social history and closed work', () => {
     const records = [

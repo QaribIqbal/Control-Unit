@@ -94,8 +94,11 @@ export function buildDashboard(records: ExecutionRecord[], sources: SourceReport
   const thisWeek = (r: ExecutionRecord) => { const d = dayOf(r); return d ? d >= weekStart && d <= today : false; };
   const kpis: Kpi[] = [];
   const add = (id: string, label: string, rows: ExecutionRecord[], available: boolean, description: string) => kpis.push({ id, label, value: available ? rows.length : null, recordIds: rows.map(r => r.id), description });
-  add('applications-total', 'Applications', applicationEntities, applicationEntities.length > 0, 'Distinct company + role with a recorded application, latest state each.');
-  add('applications-week', 'Applications this week', appliedEvents.filter(thisWeek), applicationEntities.length > 0, `Dated applications, Monday ${weekStart} through ${today}, ${timezone}. Undated records excluded.`);
+  const sentSummary = sorted.find(r => r.actionType === 'summary' && r.metadata.metric === 'applications_sent');
+  const sentCount = sentSummary ? Number(sentSummary.metadata.count) : NaN;
+  kpis.push({ id: 'applications-sent', label: 'Applications sent', value: Number.isFinite(sentCount) ? sentCount : null, recordIds: sentSummary ? [sentSummary.id] : [], description: `Reconciled submissions total stated by the apply engine in the applied log${sentSummary?.timestamp ? ` (${dayKey(sentSummary.timestamp, timezone)})` : ''}. Duplicates, voids and retracted submissions already removed.` });
+  add('applications-total', 'Roles tracked', applicationEntities, applicationEntities.length > 0, 'Distinct company + role recorded in the application log — applied, skipped, blocked and run notes — latest state each. Not a count of sent applications.');
+  add('applications-week', 'Roles logged this week', appliedEvents.filter(thisWeek), applicationEntities.length > 0, `Dated application-log events, Monday ${weekStart} through ${today}, ${timezone}. Undated records excluded.`);
   add('interviews', 'Interviews in motion', interviews.filter(r => !terminal(r) && r.status !== 'failed'), interviews.length > 0, 'Latest recorded stage per interview; closed/rejected/withdrawn excluded.');
   add('assessments', 'Assessments pending', assessments.filter(r => r.actionType === 'assessment' && !terminal(r) && !completed(r) && r.status !== 'failed'), assessments.length > 0, 'Latest open assessment states; completed, closed or progressed assessments excluded.');
   add('linkedin-total', 'LinkedIn touches', linkedin, linkedin.length > 0, 'Every recorded LinkedIn touch (not planned or failed), counted once.');
@@ -135,7 +138,7 @@ export function buildDashboard(records: ExecutionRecord[], sources: SourceReport
   ];
   const todayRows = (match: (r: ExecutionRecord) => boolean) => facts.filter(r => onDay(r) && match(r));
   const todayItems = [
-    { key: 'applications', label: 'Applications sent', rows: appliedEvents.filter(onDay) },
+    { key: 'applications', label: 'Roles logged', rows: appliedEvents.filter(onDay) },
     { key: 'linkedin', label: 'LinkedIn touches', rows: linkedin.filter(onDay) },
     { key: 'posts', label: 'Posts published', rows: todayRows(r => r.actionType === 'social_post' && r.status === 'published') },
     { key: 'blocked', label: 'Slots blocked', rows: todayRows(r => r.actionType === 'social_post' && r.status === 'blocked') },
